@@ -27,7 +27,6 @@ fi
 echo "--- Starting Environment Setup & Pre-flight Checks ---"
 
 
-
 # --- Pre-flight Checks ---
 if [ ! -f "$SALEAE_APP_PATH" ]; then
     echo "Saleae Logic 2 AppImage not found at '$SALEAE_APP_PATH'."

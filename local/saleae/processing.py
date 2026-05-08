@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import re
 import os # Import os module for path manipulation
 
 # Class to store the output naming and locations
@@ -11,13 +12,15 @@ class Graph:
         self.csv_path = os.path.join(input_dir, load_type, "digital.csv")
         self.test_type = test_type
         self.load_type = load_type
-        self.jitter_title = "Jitter Distribution (" + test_type + " under " + load_type + ")"
-        self.jitter_file_name = "jitter_histogram_" + test_type + "_" + load_type + ".png"
+        self.channel = channel
+        self.jitter_title = "Jitter Distribution (" + test_type + " under " + load_type + ", Channel " + str(channel) + ")"
+        self.jitter_file_name = "jitter_histogram_" + test_type + "_" + load_type + "_" + str(channel) + ".png"
         self.jitter_file_path = os.path.join(input_dir, self.jitter_file_name)
 
 # ---- Functions ----
 # -------------------
-def analyze_jitter(csv_path, nominal_period):
+
+def load_csv_data(csv_path):
     """
     Loads period data from a Saleae CSV, calculates jitter,
     and returns key statistics.
@@ -38,13 +41,16 @@ def analyze_jitter(csv_path, nominal_period):
     print(df.columns.tolist())
     columns = df.columns.tolist()
 
+    return df, columns
+
+def analyze_jitter(df, time_col, channel_col, nominal_period):
     # Calculate jitter in microseconds (µs)
     # Jitter = (Measured Period - Nominal Period)
     # df['jitter_us'] = (df['period_s'] - nominal_period) * 1_000_000
     # Identify 'Channel 0' toggles
-    toggles = df[df[columns[1]].diff() != 0].copy()
+    toggles = df[df[channel_col].diff() != 0].copy()
     # Calculte the time between toggles (intervals)
-    toggles['interval'] = toggles[columns[0]].diff()
+    toggles['interval'] = toggles[time_col].diff()
     # Remove the first NaN values
     intervals = toggles['interval'].dropna()
 
@@ -125,19 +131,43 @@ def main():
 
     # Create array of data to use in the loop
     graphs = [
-        Graph(args.input_dir, test_type, "idle"),
-        Graph(args.input_dir, test_type, "load")
+        [Graph(args.input_dir, test_type, state, channel) for channel in args.channels]
+        for state in ["idle", "load"]
     ]
 
     # --- Data Analysis ---
-    for graph in graphs:
-        jitter_values, statistics = analyze_jitter(graph.csv_path, args.duration)
-        if jitter_values is not None:
-            print("\n--- Jitter Analysis Results for ", graph.load_type, " Test---")
-            for key, value in statistics.items():
-                print(f"{key.replace('_', ' ').title()}: {value:.2f}")
-            print("-----------------------------\n")
-            plot_histogram(jitter_values, statistics, graph.jitter_title, graph.jitter_file_path)
+    for state_graphs in graphs:
+        df, columns = load_csv_data(state_graphs[0].csv_path)
+        time_col = columns[0]
+
+        # Make sure that there are real data
+        if df is None:
+            print("Error: No data available at path " + state_graphs[0].csv_path + ". Skipping analysis.")
+            continue
+
+        # Iterate through graph object on each channel
+        for graph in state_graphs:
+            # Regex patern to match column name
+            pattern = rf"Channel\s*{graph.channel}\b"
+
+            # Searc by the pattern
+            matched_idx, matched_col = next(
+                ((i, col) for i, col in enumerate(columns) if re.search(pattern, col, re.IGNORECASE)),
+                (None, None)
+            )
+
+            # Check if a column was found
+            if matched_idx is not None:
+                print(f"Successfully matched graph channel {graph.channel} to column '{matched_col}'")
+                jitter_values, statistics = analyze_jitter(df, time_col, matched_col, args.duration)
+                if jitter_values is not None:
+                    print("\n--- Jitter Analysis Results for ", graph.load_type, " Test---")
+                    for key, value in statistics.items():
+                        print(f"{key.replace('_', ' ').title()}: {value:.2f}")
+                    print("-----------------------------\n")
+                    plot_histogram(jitter_values, statistics, graph.jitter_title, graph.jitter_file_path)
+            else:
+                print(f"Warning: No column found matching pattern '{pattern}'")
 
 if __name__ == '__main__':
     main()
