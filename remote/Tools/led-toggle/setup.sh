@@ -9,7 +9,9 @@ PROJECT_LOCATION="${SCRIPT_DIR}"
 PROJECT_NAME="led-toggle"
 SYSTEM_FILE_LOCAL="${SCRIPT_DIR}/${PROJECT_NAME}.service"
 SYSTEM_FILE_GLOBAL="/etc/systemd/system/${PROJECT_NAME}.service"
+SYSTEM_FILE_ENV="${SCRIPT_DIR}/${PROJECT_NAME}-service-env"
 
+# The environment file will be placed in the user's home directory for clarity
 #Identify the real user
 IF_SUDO_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(getent passwd "$IF_SUDO_USER" | cut -d: -f6)
@@ -61,7 +63,17 @@ else
     sudo ldconfig
 fi
 
-# Check if system file exists to start/stop led-toggle
+# Check if environment file for the system service exist
+if [ -f "$SYSTEM_FILE_ENV" ]; then
+    echo "Status: $SYSTEM_FILE_ENV already exists. Skipping installation."
+else
+    echo "Status: Creating environment file for the system service..."
+    tee "$SYSTEM_FILE_ENV" > /dev/null <<EOF
+PERIOD=1000000
+EOF
+fi
+
+# Check if system service file exists to start/stop led-toggle
 if [ -f "$SYSTEM_FILE_GLOBAL" ]; then
     echo "Status: $SYSTEM_FILE_GLOBAL already exists. Skipping installation."
 else
@@ -77,8 +89,9 @@ Conflicts=pigpiod.service
 
 [Service]
 # Adjust the path to where your binary is actually located
-ExecStart=/home/tuiasi/Tools/led-toggle/build/led-toggle
-WorkingDirectory=/home/tuiasi/Tools/led-toggle/build
+EnvironmentFile=${SYSTEM_FILE_ENV}
+ExecStart=${PROJECT_LOCATION}/build/led-toggle \$PERIOD
+WorkingDirectory=${PROJECT_LOCATION}/build
 # Handling logs
 StandardOutput=append:/var/log/led-toggle.log
 StandardError=inherit
@@ -87,7 +100,7 @@ KillSignal=SIGTERM
 TimeoutStopSec=10s
 KillMode=process
 SuccessExitStatus=0
-Restart=always
+Restart=no
 User=root
 
 # Give the process a higher priority (Lower number = Higher priority)
