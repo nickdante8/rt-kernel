@@ -19,7 +19,6 @@ class Graph:
 
 # ---- Functions ----
 # -------------------
-
 def load_csv_data(csv_path):
     """
     Loads period data from a Saleae CSV, calculates jitter,
@@ -116,6 +115,7 @@ def plot_histogram(jitter_data, stats, title, output_file):
 def main():
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Automate processing of Saleae capture.")
+    parser.add_argument('--nominal-period', type=float, required=True, help='Nominal period in seconds.')
     parser.add_argument('--duration', type=int, required=True, help='Capture duration in seconds.')
     parser.add_argument('--input-dir', type=str, required=True, help='Directory to process captureed and exported data.')
     parser.add_argument('--channels', type=int, nargs='+', required=True, help='List of digital channels used for capture.')
@@ -159,7 +159,7 @@ def main():
             # Check if a column was found
             if matched_idx is not None:
                 print(f"Successfully matched graph channel {graph.channel} to column '{matched_col}'")
-                jitter_values, statistics = analyze_jitter(df, time_col, matched_col, args.duration)
+                jitter_values, statistics = analyze_jitter(df, time_col, matched_col, args.nominal_period)
                 if jitter_values is not None:
                     print("\n--- Jitter Analysis Results for ", graph.load_type, " Test---")
                     for key, value in statistics.items():
