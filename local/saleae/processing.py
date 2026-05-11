@@ -22,11 +22,44 @@ def plot_histograms(plots_idle, plots_load):
 # Plot phase shift
 def plot_phase_shift(plots_idle, plots_load, phase_idle, phase_load):
     # Plot phase
-    label = f"Latency Channel {plots_idle[0].channel} in comparison with Channel {plots_idle[1].channel} (idle)"
+    label = [
+        f"Latency Channel {plots_idle[0].channel} in comparison\nwith Channel {plots_idle[1].channel} (idle)",
+        f"Phase Difference Channel {plots_idle[0].channel} in\ncomparison with Channel {plots_idle[1].channel} (idle)",
+    ]
     proc.plot_phase_shift_combined(phase_idle, label, proc.plot_path(plots_idle[0], "phase_shift", "", combined=True))
 
+    label = [
+        f"Latency Channel {plots_load[0].channel} in comparison\nwith Channel {plots_load[1].channel} (load)",
+        f"Phase Difference Channel {plots_load[0].channel} in\ncomparison with Channel {plots_load[1].channel} (load)",
+    ]
     label = f"Latency Channel {plots_load[0].channel} in comparison with Channel {plots_load[1].channel} (load)"
     proc.plot_phase_shift_combined(phase_load, label, proc.plot_path(plots_load[0], "phase_shift", "", combined=True))
+
+# Plot signal drift
+def plot_signal_drift(plots_idle, plots_load):
+    # Individual
+    label = [
+        f"Channel {plots_idle[0].channel} rise ({plots_idle[0].load_type})",
+        f"Channel {plots_idle[0].channel} fall ({plots_idle[0].load_type})",
+    ]
+    proc.plot_signal_drift(plots_idle[0].result, label, proc.plot_path(plots_idle[0], "signal_drift", "rise_fall"))
+    label = [
+        f"Channel {plots_load[0].channel} rise ({plots_load[0].load_type})",
+        f"Channel {plots_load[0].channel} fall ({plots_load[0].load_type})",
+    ]
+    proc.plot_signal_drift(plots_load[0].result, label, proc.plot_path(plots_load[0], "signal_drift", "rise_fall"))
+
+    # Combined
+    label = [
+        f"Channel {plots_idle[0].channel} ({plots_idle[0].load_type})",
+        f"Channel {plots_idle[1].channel} ({plots_idle[1].load_type})",
+    ]
+    proc.plot_signal_drift_combined(plots_idle[0].result, plots_idle[1].result, label, proc.plot_path(plots_idle[0], "signal_drift", f"{plots_idle[0].channel}_{plots_idle[1].channel}", combined=True))
+    label = [
+        f"Channel {plots_load[0].channel} ({plots_load[0].load_type})",
+        f"Channel {plots_load[1].channel} ({plots_load[1].load_type})",
+    ]
+    proc.plot_signal_drift_combined(plots_load[0].result, plots_load[1].result, label, proc.plot_path(plots_load[0], "signal_drift", f"{plots_load[0].channel}_{plots_load[1].channel}", combined=True))
 
 # Plot duty cycle
 def plot_duty_cycle(plots_idle, plots_load):
@@ -75,6 +108,9 @@ def main():
 
     # Plot phases_shift
     plot_phase_shift(plots_idle, plots_load, phase_idle, phase_load)
+
+    # Plot signal drift
+    plot_signal_drift(plots_idle, plots_load)
 
     # Plot duty cycle
     plot_duty_cycle(plots_idle, plots_load)

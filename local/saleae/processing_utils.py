@@ -84,8 +84,8 @@ def perform_timing_analysis(df, time_col, channel_col, nominal_period_us):
     falling = df[(df[channel_col] == 0) & (prev_val == 1)][time_col].values
 
     # Convert to microseconds and get values
-    rising_us = np.round(rising * 1_000_000).astype(np.int64)
-    falling_us = np.round(falling * 1_000_000).astype(np.int64)
+    rising_us = np.round(rising * 1_000_000).astype(np.float64)
+    falling_us = np.round(falling * 1_000_000).astype(np.float64)
 
     # Ensure alignment: Start with Rising, End with Falling
     if len(falling_us) > 0 and len(rising_us) > 0 and falling_us[0] < rising_us[0]: 
@@ -314,15 +314,69 @@ def plot_phase_shift_combined(phase, label, output_file, show=False):
     ax2 = ax1.twinx()
     
     # for phase in phase_idle.values():
-    ax1.plot(phase['time_axis'], phase['latency'], alpha=0.4, color='blue', label=f"{label}")
-    ax2.plot(phase['time_axis'], phase['phase'], alpha=0.2, color='red')
+    ax1.plot(phase['time_axis'], phase['latency'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(phase['time_axis'], phase['phase'], alpha=0.2, color='red', label=f"{label[1]}")
 
     # --- Formatting the Plot ---
     ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Latency [s]', color='blue')
+    ax1.set_ylabel('Latency [us]', color='blue')
     ax2.set_ylabel('Phase Difference [Degrees]', color='red')
     plt.title('Latency and Phase Alignment Over Time')
-    ax1.legend(loc='upper left')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+
+def plot_signal_drift(plot, label, output_file, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+    
+    # for phase in phase_idle.values():
+    ax1.plot(plot['time_jitter_rise'], plot['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(plot['time_jitter_fall'], plot['drifts_fall'], alpha=0.2, color='red', label=f"{label[1]}")
+
+    # --- Formatting the Plot ---
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Accumulated Error [us]', color='blue')
+    ax2.set_ylabel('Accumulated Error [us]', color='red')
+    plt.title('Cumulative Signal Drift (Relative to nominal period of ' + str(plot['nominal_period_us']) + ' µs)')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+
+def plot_signal_drift_combined(plot_1, plot_2, label, output_file, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+
+    # for phase in phase_idle.values():
+    ax1.plot(plot_1['time_jitter_rise'], plot_1['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(plot_2['time_jitter_rise'], plot_2['drifts_rise'], alpha=0.2, color='red', label=f"{label[1]}")
+
+    # --- Formatting the Plot ---
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Accumulated Error [us]', color='blue')
+    ax2.set_ylabel('Accumulated Error [us]', color='red')
+    plt.title('Combined cumulative Signal Drift (Relative to nominal period of ' + str(plot_1['nominal_period_us']) + ' µs)')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
