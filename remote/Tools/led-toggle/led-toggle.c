@@ -15,6 +15,8 @@
 #define SOFT_PIN 17
 #define HARD_PIN 18
 
+#define BASIC_FREQUENCY_1HZ ((uint32_t)1000000UL)
+
 /* Global flag to control the loop */
 volatile sig_atomic_t keepRunning = 1;
 
@@ -46,6 +48,8 @@ int main(int argc, char **argv) {
     int exit_code = STD_OK;
     int pigpio_initialized = STD_FALSE;
     struct sigaction action = { .sa_handler = signalHandler };
+    uint32_t lu32_frequency = 0UL;
+    uint32_t lu32_duty = 0UL;
     uint32_t lu32_period = 0UL;
     uint32_t lu32_semi_period = 0UL;
 
@@ -79,7 +83,7 @@ int main(int argc, char **argv) {
     if (exit_code == STD_OK) {
         /* This prevents pigpio from handling signals, which we do ourselves */
         gpioCfgSetInternals(gpioCfgGetInternals() | PI_CFG_NOSIGHANDLER);
-    
+
         if (gpioInitialise() < 0)
         {
             syslog(LOG_ERR, "Failed to initialize pigpio!");
@@ -91,14 +95,18 @@ int main(int argc, char **argv) {
         }
     }
 
-    /* Mina logic */
+    /* Main logic */
     if (pigpio_initialized == STD_TRUE)
     {
-        /* Calculate the semi-period */
+        /* Calculate periods */
         lu32_semi_period = (uint32_t)(lu32_period / 2U);
+        lu32_frequency = BASIC_FREQUENCY_1HZ /lu32_period;
+        lu32_duty = PI_HW_PWM_RANGE / 2U;
+
+        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\n", lu32_semi_period, lu32_frequency, lu32_duty);
 
         /* Hardware PWM (GPIO 18) - 1Hz, 50% duty cycle */
-        gpioHardwarePWM(HARD_PIN, 1, lu32_semi_period); 
+        gpioHardwarePWM(HARD_PIN, lu32_frequency, lu32_duty); 
         syslog(LOG_INFO, "Hardware PWM initialized on GPIO 18.");
     
         gpioSetMode(SOFT_PIN, PI_OUTPUT);

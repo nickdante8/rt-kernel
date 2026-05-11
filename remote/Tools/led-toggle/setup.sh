@@ -7,9 +7,10 @@ set -e
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_LOCATION="${SCRIPT_DIR}"
 PROJECT_NAME="led-toggle"
-SYSTEM_FILE_LOCAL="${SCRIPT_DIR}/${PROJECT_NAME}.service"
-SYSTEM_FILE_GLOBAL="/etc/systemd/system/${PROJECT_NAME}.service"
-SYSTEM_FILE_ENV="${SCRIPT_DIR}/${PROJECT_NAME}-service-env"
+SERVICE_NAME="${PROJECT_NAME}@.service"
+SERVICE_ENABLE_NAME="${PROJECT_NAME}@period.service"
+SYSTEM_FILE_LOCAL="${SCRIPT_DIR}/${SERVICE_NAME}"
+SYSTEM_FILE_GLOBAL="/etc/systemd/system/${SERVICE_NAME}"
 
 # The environment file will be placed in the user's home directory for clarity
 #Identify the real user
@@ -63,16 +64,6 @@ else
     sudo ldconfig
 fi
 
-# Check if environment file for the system service exist
-if [ -f "$SYSTEM_FILE_ENV" ]; then
-    echo "Status: $SYSTEM_FILE_ENV already exists. Skipping installation."
-else
-    echo "Status: Creating environment file for the system service..."
-    tee "$SYSTEM_FILE_ENV" > /dev/null <<EOF
-PERIOD=1000000
-EOF
-fi
-
 # Check if system service file exists to start/stop led-toggle
 if [ -f "$SYSTEM_FILE_GLOBAL" ]; then
     echo "Status: $SYSTEM_FILE_GLOBAL already exists. Skipping installation."
@@ -89,8 +80,10 @@ Conflicts=pigpiod.service
 
 [Service]
 # Adjust the path to where your binary is actually located
-EnvironmentFile=${SYSTEM_FILE_ENV}
-ExecStart=${PROJECT_LOCATION}/build/led-toggle \$PERIOD
+#EnvironmentFile=${SYSTEM_FILE_ENV}
+#ExecStart=${PROJECT_LOCATION}/build/led-toggle \$PERIOD
+Environment="SCRIPT_ARGS=%I"
+ExecStart=/home/tuiasi/Tools/led-toggle/build/led-toggle \$SCRIPT_ARGS
 WorkingDirectory=${PROJECT_LOCATION}/build
 # Handling logs
 StandardOutput=append:/var/log/led-toggle.log
@@ -117,8 +110,8 @@ EOF
     systemctl daemon-reload
 
     # Enable the service to start automatically on boot
-    systemctl enable led-toggle.service
+    systemctl enable ${SERVICE_ENABLE_NAME}
 
-    echo "Success: led-toggle.service is now active and enabled."
-    echo "To start it run: sudo systemctl start led-toggle.service"
+    echo "Success: ${SERVICE_NAME} is now active and enabled."
+    echo "To start it run: sudo systemctl start ${SERVICE_NAME}"
 fi
