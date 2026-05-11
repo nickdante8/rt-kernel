@@ -6,6 +6,7 @@ local/test_results/*
 
 # Files
 local/saleae.log
+*.png
 
 # Bash specific
 
