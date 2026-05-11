@@ -36,7 +36,7 @@ fi
 # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
 # The long options are defined after --long.
 # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-PARSED_ARGS=$(getopt -o '' --long type:,duration: -- "$@")
+PARSED_ARGS=$(getopt -o '' --long type:,duration:,nominal-period-us: -- "$@")
 
 # Check for parsing errors
 if [ $? -ne 0 ]; then
@@ -51,6 +51,10 @@ while true; do
     case "$1" in
         --type)
             test_type_arg="$2"
+            shift 2
+            ;;
+        --nominal-period-us)
+            NOMINAL_PERIOD_US="$2"
             shift 2
             ;;
         --duration)
@@ -83,6 +87,9 @@ if [ -n "$test_type_arg" ]; then
     fi
 fi
 
+# Create service call with parameter
+LED_TOGGLE_SERVICE_CALL_NAME="led-toggle@\""${NOMINAL_PERIOD_US}"\".service"
+
 # --- Display Final Configuration ---
 echo "--- Final Configuration ---"
 echo "TEST_NAME: ${TEST_NAME}"
@@ -108,7 +115,7 @@ testing() {
     fi
 
     echo "[Step ${TEST_ID}.3/5]Starting led-toggle service on remote RPI..."
-    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl start led-toggle.service"
+    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl start ${LED_TOGGLE_SERVICE_CALL_NAME}"
 
     # Give the service a moment to initialize
     sleep 1
@@ -119,12 +126,12 @@ testing() {
     python3 "$PYTHON_MEASUREMENT_SCRIPT" \
         --port "$SALEAE_AUTOMATION_PORT" \
         --device "$SALEAE_DEVICE_ID" \
-        --duration "$CAPTURE_DURATION_S" \
+        --duration-s "$CAPTURE_DURATION_S" \
         --output-dir "$OUTPUT_DIR/$TEST_TYPE" \
         --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
 
     echo "[Step ${TEST_ID}.5/5]Stop led-toggle service on remote RPI..."
-    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl stop led-toggle.service"
+    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl stop ${LED_TOGGLE_SERVICE_CALL_NAME}"
 
     echo "  Retrieving log files from remote RPI..."
     sshpass -f .sshpass scp "${RPI_USER}@${RPI_HOST}:/var/log/led-toggle.log" "${OUTPUT_DIR}/${TEST_NAME}.log"
@@ -137,7 +144,8 @@ processing() {
     # Run the python script to perform the capture.
     # It will connect to the already running Logic 2 instance.
     python3 "$PYTHON_PROCESSING_SCRIPT" \
-        --duration "$CAPTURE_DURATION_S" \
+        --nominal-period-us "$NOMINAL_PERIOD_US" \
+        --duration-s "$CAPTURE_DURATION_S" \
         --input-dir "$OUTPUT_DIR" \
         --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
 }
