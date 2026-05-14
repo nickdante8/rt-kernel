@@ -7,10 +7,13 @@ set -e
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 PROJECT_LOCATION="${SCRIPT_DIR}"
 PROJECT_NAME="led-toggle"
-SERVICE_NAME="${PROJECT_NAME}@.service"
-SERVICE_ENABLE_NAME="${PROJECT_NAME}@period.service"
-SYSTEM_FILE_LOCAL="${SCRIPT_DIR}/${SERVICE_NAME}"
-SYSTEM_FILE_GLOBAL="/etc/systemd/system/${SERVICE_NAME}"
+SYS_SERVICE_FILE_NAME="${PROJECT_NAME}@.service"
+SYS_SERVICE_ENABLE_FILE_NAME="${PROJECT_NAME}@period.service"
+SYS_SERVICE_FILE_LOCAL_PATH="${SCRIPT_DIR}/${SYS_SERVICE_FILE_NAME}"
+SYS_SERVICE_FILE_GLOBAL_PATH="/etc/systemd/system/${SYS_SERVICE_FILE_NAME}"
+LED_TOGGLE_WORKING_DIRECTORY="${PROJECT_LOCATION}/build"
+LED_TOGGLE_EXE_PATH="${LED_TOGGLE_WORKING_DIRECTORY}/${PROJECT_NAME}"
+
 
 # The environment file will be placed in the user's home directory for clarity
 #Identify the real user
@@ -26,7 +29,7 @@ else
 fi
 
 # Set the right file mod
-chmod +x build.sh
+chmod +x ${PROJECT_LOCATION}/build.sh
 
 # Check if library is installed
 echo "Checking for pigpio library..."
@@ -65,13 +68,13 @@ else
 fi
 
 # Check if system service file exists to start/stop led-toggle
-if [ -f "$SYSTEM_FILE_GLOBAL" ]; then
-    echo "Status: $SYSTEM_FILE_GLOBAL already exists. Skipping installation."
+if [ -f "$SYS_SERVICE_FILE_GLOBAL_PATH" ]; then
+    echo "Status: $SYS_SERVICE_FILE_GLOBAL_PATH already exists. Skipping installation."
 else
     echo "Status: Installing system service..."
 
     # Install the system service
-    tee "$SYSTEM_FILE_LOCAL" > /dev/null <<EOF
+    tee "$SYS_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
 [Unit]
 Description=Raspberry Pi GPIO Toggle Service
 After=network.target
@@ -79,12 +82,14 @@ After=network.target
 Conflicts=pigpiod.service
 
 [Service]
+# Real-Time Scheduling Configuration
+# This forces the kernel to prioritize this task over the network stack
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
 # Adjust the path to where your binary is actually located
-#EnvironmentFile=${SYSTEM_FILE_ENV}
-#ExecStart=${PROJECT_LOCATION}/build/led-toggle \$PERIOD
 Environment="SCRIPT_ARGS=%I"
-ExecStart=/home/tuiasi/Tools/led-toggle/build/led-toggle \$SCRIPT_ARGS
-WorkingDirectory=${PROJECT_LOCATION}/build
+ExecStart=${LED_TOGGLE_EXE_PATH} \$SCRIPT_ARGS
+WorkingDirectory=${LED_TOGGLE_WORKING_DIRECTORY}
 # Handling logs
 StandardOutput=append:/var/log/led-toggle.log
 StandardError=inherit
@@ -96,22 +101,19 @@ SuccessExitStatus=0
 Restart=no
 User=root
 
-# Give the process a higher priority (Lower number = Higher priority)
-Nice=-10
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
     echo "Status: File created. Finalizing systemd configuration..."
 
-    mv $SYSTEM_FILE_LOCAL $SYSTEM_FILE_GLOBAL
+    mv $SYS_SERVICE_FILE_LOCAL_PATH $SYS_SERVICE_FILE_GLOBAL_PATH
     # Reload systemd to recognize the new file
     systemctl daemon-reload
 
     # Enable the service to start automatically on boot
-    systemctl enable ${SERVICE_ENABLE_NAME}
+    systemctl enable ${SYS_SERVICE_ENABLE_FILE_NAME}
 
-    echo "Success: ${SERVICE_NAME} is now active and enabled."
-    echo "To start it run: sudo systemctl start ${SERVICE_NAME}"
+    echo "Success: ${SYS_SERVICE_FILE_NAME} is now active and enabled."
+    echo "To start it run: sudo systemctl start ${SYS_SERVICE_FILE_NAME}"
 fi

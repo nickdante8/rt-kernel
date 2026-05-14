@@ -35,14 +35,14 @@ def plot_duty_cycle(plots_idle, plots_load):
     pli = plots_idle[0]
     pll = plots_load[0]
     plp = plots_idle[0]
-    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pli.load_type}"
+    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pll.load_type}"
     proc.plot_duty_cycle_combined(pli.result, pll.result, title, proc.plot_path(plp, "duty_cycle", "",combined=True))
 
     # Plot duty cycle idle
     pli = plots_idle[1]
     pll = plots_load[1]
     plp = plots_load[0]
-    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pli.load_type}"
+    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pll.load_type}"
     proc.plot_duty_cycle_combined(pli.result, pll.result, title, proc.plot_path(plp, "duty_cycle", "",combined=True))
 
 
