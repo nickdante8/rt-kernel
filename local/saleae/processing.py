@@ -8,67 +8,44 @@ import processing_utils as proc
 # Plot histograms
 def plot_histograms(plots_idle, plots_load):
     # Plot histogram idle
-    for plot in plots_idle:
-        proc.plot_histogram_rise(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "rise"))
-        proc.plot_histogram_fall(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "fall"))
-        proc.plot_histogram_combined(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "rise_fall"))
-        
+    proc.plot_histograms(plots_idle)        
+    
     # Plot histogram load
-    for plot in plots_load:
-        proc.plot_histogram_rise(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "rise"))
-        proc.plot_histogram_fall(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "fall"))
-        proc.plot_histogram_combined(plot.result, plot.jitter_title, proc.plot_path(plot, "histogram", "rise_fall"))
+    proc.plot_histograms(plots_load)
 
 # Plot phase shift
 def plot_phase_shift(plots_idle, plots_load, phase_idle, phase_load):
     # Plot phase
-    label = [
-        f"Latency Channel {plots_idle[0].channel} in comparison\nwith Channel {plots_idle[1].channel} (idle)",
-        f"Phase Difference Channel {plots_idle[0].channel} in\ncomparison with Channel {plots_idle[1].channel} (idle)",
-    ]
-    proc.plot_phase_shift_combined(phase_idle, label, proc.plot_path(plots_idle[0], "phase_shift", "", combined=True))
-
-    label = [
-        f"Latency Channel {plots_load[0].channel} in comparison\nwith Channel {plots_load[1].channel} (load)",
-        f"Phase Difference Channel {plots_load[0].channel} in\ncomparison with Channel {plots_load[1].channel} (load)",
-    ]
-    label = f"Latency Channel {plots_load[0].channel} in comparison with Channel {plots_load[1].channel} (load)"
-    proc.plot_phase_shift_combined(phase_load, label, proc.plot_path(plots_load[0], "phase_shift", "", combined=True))
+    proc.plot_phase_shift_combined(phase_idle, plots_idle)
+    proc.plot_phase_shift_combined(phase_load, plots_load)
 
 # Plot signal drift
 def plot_signal_drift(plots_idle, plots_load):
     # Individual
-    label = [
-        f"Channel {plots_idle[0].channel} rise ({plots_idle[0].load_type})",
-        f"Channel {plots_idle[0].channel} fall ({plots_idle[0].load_type})",
-    ]
-    proc.plot_signal_drift(plots_idle[0].result, label, proc.plot_path(plots_idle[0], "signal_drift", "rise_fall"))
-    label = [
-        f"Channel {plots_load[0].channel} rise ({plots_load[0].load_type})",
-        f"Channel {plots_load[0].channel} fall ({plots_load[0].load_type})",
-    ]
-    proc.plot_signal_drift(plots_load[0].result, label, proc.plot_path(plots_load[0], "signal_drift", "rise_fall"))
+    proc.plot_signal_drift(plots_idle)
+    proc.plot_signal_drift(plots_load)
 
     # Combined
-    label = [
-        f"Channel {plots_idle[0].channel} ({plots_idle[0].load_type})",
-        f"Channel {plots_idle[1].channel} ({plots_idle[1].load_type})",
-    ]
-    proc.plot_signal_drift_combined(plots_idle[0].result, plots_idle[1].result, label, proc.plot_path(plots_idle[0], "signal_drift", f"{plots_idle[0].channel}_{plots_idle[1].channel}", combined=True))
-    label = [
-        f"Channel {plots_load[0].channel} ({plots_load[0].load_type})",
-        f"Channel {plots_load[1].channel} ({plots_load[1].load_type})",
-    ]
-    proc.plot_signal_drift_combined(plots_load[0].result, plots_load[1].result, label, proc.plot_path(plots_load[0], "signal_drift", f"{plots_load[0].channel}_{plots_load[1].channel}", combined=True))
+    proc.plot_signal_drift_combined(plots_idle[0], plots_idle[1])
+    proc.plot_signal_drift_combined(plots_load[0], plots_load[1])
 
 # Plot duty cycle
 def plot_duty_cycle(plots_idle, plots_load):
     # Plot duty cycle idle
-    title = "Duty Cycle comparison. Channel 0 from idle and load"
-    proc.plot_duty_cycle_combined(plots_idle[0].result, plots_load[0].result, title, proc.plot_path(plots_idle[0], "duty_cycle", "",combined=True))
-    # Plot duty cycle load
-    title = "Duty Cycle comparison. Channel 1 from idle and load"
-    proc.plot_duty_cycle_combined(plots_idle[1].result, plots_load[1].result, title, proc.plot_path(plots_load[1], "duty_cycle", "",combined=True), y_lim=(50.0025, 50.004))
+    pli = plots_idle[0]
+    pll = plots_load[0]
+    plp = plots_idle[0]
+    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pli.load_type}"
+    proc.plot_duty_cycle_combined(pli.result, pll.result, title, proc.plot_path(plp, "duty_cycle", "",combined=True))
+
+    # Plot duty cycle idle
+    pli = plots_idle[1]
+    pll = plots_load[1]
+    plp = plots_load[0]
+    title = f"Duty Cycle comparison. Channel {pli.channel} from {pli.load_type} and {pli.load_type}"
+    proc.plot_duty_cycle_combined(pli.result, pll.result, title, proc.plot_path(plp, "duty_cycle", "",combined=True))
+
+
 
 # ------- MAIN ------
 # -------------------

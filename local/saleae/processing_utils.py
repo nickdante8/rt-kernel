@@ -44,6 +44,228 @@ def _extract_analysis(self, df, columns):
 
     return result
 
+def _plot_histogram_rise(stats, title, output_file, show=False):
+    """
+    Generates and saves a histogram of the jitter data.
+    """
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Create the histogram
+    # The number of bins can be adjusted. 'auto' is a good starting point.
+    ax.hist(stats['jitter_rise'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Rise)')
+
+    # Add a vertical line for the mean
+    ax.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_rise_us']:.2f} µs")
+
+    # --- Formatting the Plot ---
+    ax.set_title(title, fontsize=16)
+    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
+    ax.set_ylabel('Probability Density', fontsize=12)
+    ax.grid(True)
+    ax.legend()
+
+    # Add a text box with detailed statistics
+    stats_text = (
+        f"Samples: {stats['sample_count']}\n"
+        f"Std Dev: {stats['std_dev_rise_us']:.2f} µs\n"
+        f"Min Jitter: {stats['min_jitter_rise_us']:.2f} µs\n"
+        f"Max Jitter (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
+        f"Peak-to-Peak: {stats['peak_to_peak_jitter_rise_us']:.2f} µs"
+    )
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+        
+def _plot_histogram_fall(stats, title, output_file, show=False):
+    """
+    Generates and saves a histogram of the jitter data.
+    """
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Create the histogram
+    # The number of bins can be adjusted. 'auto' is a good starting point.
+    ax.hist(stats['jitter_fall'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Fall)')
+
+    # Add a vertical line for the mean
+    ax.axvline(stats['mean_jitter_fall_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
+
+    # --- Formatting the Plot ---
+    ax.set_title(title, fontsize=16)
+    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
+    ax.set_ylabel('Probability Density', fontsize=12)
+    ax.grid(True)
+    ax.legend()
+
+    # Add a text box with detailed statistics
+    stats_text = (
+        f"Samples: {stats['sample_count']}\n"
+        f"Std Dev: {stats['std_dev_fall_us']:.2f} µs\n"
+        f"Min Jitter: {stats['min_jitter_fall_us']:.2f} µs\n"
+        f"Max Jitter (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
+        f"Peak-to-Peak: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
+    )
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+
+def _plot_histogram_combined(stats, title, output_file, show=False):
+    """
+    Generates and saves a histogram of the jitter data.
+    """
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx()
+
+    # Create the histogram
+    # The number of bins can be adjusted. 'auto' is a good starting point.
+    ax1.hist(stats['jitter_rise'], bins='auto', density=True, color='r', alpha=0.75, label='Jitter Distribution Rise')
+    ax2.hist(stats['jitter_fall'], bins='auto', density=True, color='b', alpha=0.45, label='Jitter Distribution Fall')
+
+    # Add a vertical line for the mean
+    ax1.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='dashed', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
+    ax2.axvline(stats['mean_jitter_fall_us'], color='b', linestyle='dotted', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
+
+    # --- Formatting the Plot ---
+    ax1.set_title(title, fontsize=16)
+    ax1.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
+    ax1.set_ylabel('Probability Density', fontsize=12)
+    ax1.grid(True)
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2)
+
+    # Add a text box with detailed statistics
+    stats_rise_fall_text = (
+        f"Samples: {stats['sample_count']}\n"
+        f"Std Dev Rise: {stats['std_dev_rise_us']:.2f} µs\n"
+        f"Std Dev Fall: {stats['std_dev_fall_us']:.2f} µs\n"
+        f"Min Jitter Rise: {stats['min_jitter_rise_us']:.2f} µs\n"
+        f"Min Jitter Fall: {stats['min_jitter_fall_us']:.2f} µs\n"
+        f"Max Jitter Rise (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
+        f"Max Jitter Fall (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
+        f"Peak-to-Peak Rise: {stats['peak_to_peak_jitter_rise_us']:.2f} µs\n"
+        f"Peak-to-Peak Fall: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
+    )
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax1.text(0.02, 0.97, stats_rise_fall_text, transform=ax1.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+
+def _plot_phase_shift_combined(phase, label, output_file, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+    
+    # for phase in phase_idle.values():
+    ax1.plot(phase['time_axis'], phase['latency'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(phase['time_axis'], phase['phase'], alpha=0.2, color='red', label=f"{label[1]}")
+
+    # --- Formatting the Plot ---
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Latency [us]', color='blue')
+    ax2.set_ylabel('Phase Difference [Degrees]', color='red')
+    plt.title('Latency and Phase Alignment Over Time')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+
+def _plot_signal_drift(plot, label, output_file, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+    
+    # for phase in phase_idle.values():
+    ax1.plot(plot['time_jitter_rise'], plot['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(plot['time_jitter_fall'], plot['drifts_fall'], alpha=0.2, color='red', label=f"{label[1]}")
+
+    # --- Formatting the Plot ---
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Accumulated Error [us]', color='blue')
+    ax2.set_ylabel('Accumulated Error [us]', color='red')
+    plt.title('Cumulative Signal Drift (Relative to nominal period of ' + str(plot['nominal_period_us']) + ' µs)')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+
+def _plot_signal_drift_combined(plot_1, plot_2, label, output_file, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+
+    # for phase in phase_idle.values():
+    ax1.plot(plot_1['time_jitter_rise'], plot_1['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
+    ax2.plot(plot_2['time_jitter_rise'], plot_2['drifts_rise'], alpha=0.2, color='red', label=f"{label[1]}")
+
+    # --- Formatting the Plot ---
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Accumulated Error [us]', color='blue')
+    ax2.set_ylabel('Accumulated Error [us]', color='red')
+    plt.title('Combined cumulative Signal Drift (Relative to nominal period of ' + str(plot_1['nominal_period_us']) + ' µs)')
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Histogram saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory
+
 
 # ---- Public Functions ----
 # -------------------
@@ -176,215 +398,47 @@ def plot_path(plot, type, name, combined=False):
     combined_path = os.path.join(plot.input_dir, combined_path)
     return combined_path
 
-def plot_histogram_rise(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
+def plot_histograms(plots, show=False):
+    # Plot all histogram types
+    for plot in plots:
+        _plot_histogram_rise(plot.result, plot.jitter_title,
+                             plot_path(plot, "histogram", "rise"),
+                             show=show)
+        _plot_histogram_fall(plot.result, plot.jitter_title,
+                             plot_path(plot, "histogram", "fall"),
+                             show=show)
+        _plot_histogram_combined(plot.result, plot.jitter_title,
+                                 plot_path(plot, "histogram", "rise_fall"),
+                                 show=show)
 
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax.hist(stats['jitter_rise'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Rise)')
+def plot_phase_shift_combined(phase, plots, show=False):
+    label = [
+        f"Latency Channel {plots[0].channel} in comparison\nwith Channel {plots[1].channel} ({plots[1].load_type})",
+        f"Phase Difference Channel {plots[0].channel} in\ncomparison with Channel {plots[1].channel} ({plots[1].load_type})",
+    ]
+    _plot_phase_shift_combined(phase, label,
+                               plot_path(plots[0], "phase_shift", "", combined=True),
+                               show=show)
 
-    # Add a vertical line for the mean
-    ax.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_rise_us']:.2f} µs")
+def plot_signal_drift(plots, show=False):
+    for plot in plots:
+        # Individual
+        label = [
+            f"Channel {plot.channel} rise ({plot.load_type})",
+            f"Channel {plot.channel} fall ({plot.load_type})",
+        ]
+        _plot_signal_drift(plot.result, label,
+                           plot_path(plot, "signal_drift", "rise_fall"),
+                           show=show)
 
-    # --- Formatting the Plot ---
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax.set_ylabel('Probability Density', fontsize=12)
-    ax.grid(True)
-    ax.legend()
-
-    # Add a text box with detailed statistics
-    stats_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev: {stats['std_dev_rise_us']:.2f} µs\n"
-        f"Min Jitter: {stats['min_jitter_rise_us']:.2f} µs\n"
-        f"Max Jitter (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
-        f"Peak-to-Peak: {stats['peak_to_peak_jitter_rise_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-        
-def plot_histogram_fall(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax.hist(stats['jitter_fall'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Fall)')
-
-    # Add a vertical line for the mean
-    ax.axvline(stats['mean_jitter_fall_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-
-    # --- Formatting the Plot ---
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax.set_ylabel('Probability Density', fontsize=12)
-    ax.grid(True)
-    ax.legend()
-
-    # Add a text box with detailed statistics
-    stats_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev: {stats['std_dev_fall_us']:.2f} µs\n"
-        f"Min Jitter: {stats['min_jitter_fall_us']:.2f} µs\n"
-        f"Max Jitter (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
-        f"Peak-to-Peak: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-
-def plot_histogram_combined(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(12, 7))
-    ax2 = ax1.twinx()
-
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax1.hist(stats['jitter_rise'], bins='auto', density=True, color='r', alpha=0.75, label='Jitter Distribution Rise')
-    ax2.hist(stats['jitter_fall'], bins='auto', density=True, color='b', alpha=0.45, label='Jitter Distribution Fall')
-
-    # Add a vertical line for the mean
-    ax1.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='dashed', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-    ax2.axvline(stats['mean_jitter_fall_us'], color='b', linestyle='dotted', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-
-    # --- Formatting the Plot ---
-    ax1.set_title(title, fontsize=16)
-    ax1.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax1.set_ylabel('Probability Density', fontsize=12)
-    ax1.grid(True)
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2)
-
-    # Add a text box with detailed statistics
-    stats_rise_fall_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev Rise: {stats['std_dev_rise_us']:.2f} µs\n"
-        f"Std Dev Fall: {stats['std_dev_fall_us']:.2f} µs\n"
-        f"Min Jitter Rise: {stats['min_jitter_rise_us']:.2f} µs\n"
-        f"Min Jitter Fall: {stats['min_jitter_fall_us']:.2f} µs\n"
-        f"Max Jitter Rise (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
-        f"Max Jitter Fall (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
-        f"Peak-to-Peak Rise: {stats['peak_to_peak_jitter_rise_us']:.2f} µs\n"
-        f"Peak-to-Peak Fall: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax1.text(0.02, 0.97, stats_rise_fall_text, transform=ax1.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-
-def plot_phase_shift_combined(phase, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-    
-    # for phase in phase_idle.values():
-    ax1.plot(phase['time_axis'], phase['latency'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(phase['time_axis'], phase['phase'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Latency [us]', color='blue')
-    ax2.set_ylabel('Phase Difference [Degrees]', color='red')
-    plt.title('Latency and Phase Alignment Over Time')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-
-def plot_signal_drift(plot, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-    
-    # for phase in phase_idle.values():
-    ax1.plot(plot['time_jitter_rise'], plot['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(plot['time_jitter_fall'], plot['drifts_fall'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Accumulated Error [us]', color='blue')
-    ax2.set_ylabel('Accumulated Error [us]', color='red')
-    plt.title('Cumulative Signal Drift (Relative to nominal period of ' + str(plot['nominal_period_us']) + ' µs)')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-
-def plot_signal_drift_combined(plot_1, plot_2, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-
-    # for phase in phase_idle.values():
-    ax1.plot(plot_1['time_jitter_rise'], plot_1['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(plot_2['time_jitter_rise'], plot_2['drifts_rise'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Accumulated Error [us]', color='blue')
-    ax2.set_ylabel('Accumulated Error [us]', color='red')
-    plt.title('Combined cumulative Signal Drift (Relative to nominal period of ' + str(plot_1['nominal_period_us']) + ' µs)')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
+def plot_signal_drift_combined(plot1, plot2, show=False):
+    label = [
+        f"Channel {plot1.channel} ({plot1.load_type})",
+        f"Channel {plot2.channel} ({plot2.load_type})",
+    ]
+    _plot_signal_drift_combined(plot1.result, plot2.result, label, 
+                                plot_path(plot1, "signal_drift", f"{plot1.channel}_{plot2.channel}", combined=True),
+                                show=show)
 
 def plot_duty_cycle_combined(stats_idle, stats_load, title, output_file, show=False, y_lim=None):
     """
@@ -420,3 +474,5 @@ def plot_duty_cycle_combined(stats_idle, stats_load, title, output_file, show=Fa
     if show == True:
         plt.show()
         plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up
