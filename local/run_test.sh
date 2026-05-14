@@ -5,6 +5,9 @@
 # captures data with a Saleae Logic Analyzer, exports the results,
 # and runs the Python analysis script.
 
+# ==============================================================================
+# 1. SETTINGS & GLOBALS
+# ==============================================================================
 # Exit immediately if a command exits with a non-zero status.
 set -e
 
@@ -13,93 +16,112 @@ set -e
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 cd "$SCRIPT_DIR"
 
-# --- Setup and python .venv activation ----
-# Run the setup script to ensure all dependencies are met and the venv is active.
-# Use 'source' so that environment changes (like venv activation) persist.
-source "${SCRIPT_DIR}/setup.sh"
 
-# --- .env LOADING ---
-# This safely loads the variables from .env without touching other files
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-    echo "[✔] Environment variables loaded."
-else
-    echo "[!] No .env file found. Using defaults."
-fi
-
-# --- Argument Parsing (Highest Precedence) ---
-# This section will parse command-line arguments and override any values
-# set by the initial defaults or the .env file.
-
-# Use getopt for robust argument parsing. The empty string '' after -o means no short options.
-# The long options are defined after --long.
-# The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-PARSED_ARGS=$(getopt -o '' --long type:,duration:,nominal-period-us: -- "$@")
-
-# Check for parsing errors
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to parse arguments." >&2
-    exit 1
-fi
-
-# eval set -- "$PARSED_ARGS" assigns the parsed arguments back to the script's positional parameters.
-eval set -- "$PARSED_ARGS"
-
-while true; do
-    case "$1" in
-        --type)
-            test_type_arg="$2"
-            shift 2
-            ;;
-        --nominal-period-us)
-            NOMINAL_PERIOD_US="$2"
-            shift 2
-            ;;
-        --duration)
-            CAPTURE_DURATION_S="$2"
-            shift 2
-            ;;
-        --)
-            shift
-            break
-            ;;
-        *)
-            echo "Internal error during argument parsing: $1"
-            exit 1
-            break
-            ;;
-    esac
-done
-
-# --- Test type and name ---
-if [ -n "$test_type_arg" ]; then
-    if [ $test_type_arg = "rt" ]; then
-        TEST_NAME="${TEST_NAME_RT}_${DATE}"
-        OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
-    elif [ $test_type_arg = "default" ]; then
-        TEST_NAME="${TEST_NAME_DEFAULT}_${DATE}"
-        OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
+# ==============================================================================
+# 2. HELPER FUNCTIONS
+# ==============================================================================
+# Load environment variable of the script
+environment_var() {
+    # --- .env LOADING ---
+    # This safely loads the variables from .env without touching other files
+    if [ -f "$SCRIPT_DIR/.env" ]; then
+        set -a
+        source "$SCRIPT_DIR/.env"
+        set +a
+        echo "[✔] Environment variables loaded."
     else
-        echo "ERROR: --type argument accepts only 'rt' or 'default'."
+        echo "[!] No .env file found. Using defaults."
+    fi
+}
+
+# Setup running environment with setup.sh
+setup_environment() {
+    # --- Setup and python .venv activation ----
+    # Run the setup script to ensure all dependencies are met and the venv is active.
+    # Use 'source' so that environment changes (like venv activation) persist.
+    source "${SCRIPT_DIR}/setup.sh"
+
+    # Prompt for password if not set
+    if [ ! -f "$SCRIPT_DIR/.sshpass" ]; then
+        echo "ERROR: File $SCRIPT_DIR/.sshpass doesn't exist. Create it and save the password to it."
         exit 1
     fi
-fi
 
-# Create service call with parameter
-LED_TOGGLE_SERVICE_CALL_NAME="led-toggle@\""${NOMINAL_PERIOD_US}"\".service"
+    if ! sshpass -f .sshpass ssh -o StrictHostKeyChecking=no -q "${RPI_USER}@${RPI_HOST}" exit; then
+        echo "ERROR: Could not connect to RPI at '${RPI_USER}@${RPI_HOST}' via SSH with the provided password."
+        exit 1
+    fi
+}
 
-# --- Display Final Configuration ---
-echo "--- Final Configuration ---"
-echo "TEST_NAME: ${TEST_NAME}"
-echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
-echo "OUTPUT_DIR: ${OUTPUT_DIR}"
-echo "---------------------------"
+# This section will parse command-line arguments and override any values
+# set by the initial defaults or the .env file.
+argument_parse() {
+    # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
+    # The long options are defined after --long.
+    # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
+    PARSED_ARGS=$(getopt -o '' --long type:,duration-s:,nominal-period-us: -- "$@")
 
-# ---- Functions ----
-# -------------------
-# idle/load testing
+    # Check for parsing errors
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to parse arguments." >&2
+        exit 1
+    fi
+
+    # eval set -- "$PARSED_ARGS" assigns the parsed arguments back to the script's positional parameters.
+    eval set -- "$PARSED_ARGS"
+
+    while true; do
+        case "$1" in
+            --type)
+                test_type_arg="$2"
+                shift 2
+                ;;
+            --nominal-period-us)
+                NOMINAL_PERIOD_US="$2"
+                shift 2
+                ;;
+            --duration-s)
+                CAPTURE_DURATION_S="$2"
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                echo "Internal error during argument parsing: $1"
+                exit 1
+                break
+                ;;
+        esac
+    done
+
+    # --- Test type and name ---
+    if [ -n "$test_type_arg" ]; then
+        if [ $test_type_arg = "rt" ]; then
+            TEST_NAME="${TEST_NAME_RT}_${DATE}"
+            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
+        elif [ $test_type_arg = "default" ]; then
+            TEST_NAME="${TEST_NAME_DEFAULT}_${DATE}"
+            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
+        else
+            echo "ERROR: --type argument accepts only 'rt' or 'default'."
+            exit 1
+        fi
+    fi
+
+    # Create service call with parameter
+    LED_TOGGLE_SERVICE_CALL_NAME="led-toggle@\""${NOMINAL_PERIOD_US}"\".service"
+
+    # --- Display Final Configuration ---
+    echo "--- Final Configuration ---"
+    echo "TEST_NAME: ${TEST_NAME}"
+    echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
+    echo "OUTPUT_DIR: ${OUTPUT_DIR}"
+    echo "---------------------------"
+}
+
+# Idle/load testing
 testing() {
     if [ "$1" = "idle" ]; then
         local TEST_TYPE="idle"
@@ -151,61 +173,65 @@ processing() {
 }
 
 
-# ---- Main logic ----
-# -------------------
-# Prompt for password if not set
-if [ ! -f "$SCRIPT_DIR/.sshpass" ]; then
-    echo "ERROR: File $SCRIPT_DIR/.sshpass doesn't exist. Create it and save the password to it."
-    exit 1
-fi
+# ==============================================================================
+# 3. MAIN LOGIC (The "Entry Point")
+# ==============================================================================
+main() {
+    # Ensure sudo access early so it doesn't prompt in the middle of a loop
+    sudo -v
 
-if ! sshpass -f .sshpass ssh -o StrictHostKeyChecking=no -q "${RPI_USER}@${RPI_HOST}" exit; then
-    echo "ERROR: Could not connect to RPI at '${RPI_USER}@${RPI_HOST}' via SSH with the provided password."
-    exit 1
-fi
+    # Set global variables, dependencies and parge arguments
+    environment_var
+    setup_environment
+    argument_parse "$@"
 
-echo "--- Starting Test: ${TEST_NAME} ---"
-echo "Capture duration: ${CAPTURE_DURATION_S} seconds"
+    # Actual testing
+    echo "--- Starting Test: ${TEST_NAME} ---"
+    echo "Capture duration: ${CAPTURE_DURATION_S} seconds"
 
-# Create a directory for the test results
-mkdir -p "$OUTPUT_DIR"
-echo "Results will be saved in: ${OUTPUT_DIR}"
+    # Create a directory for the test results
+    mkdir -p "$OUTPUT_DIR"
+    echo "Results will be saved in: ${OUTPUT_DIR}"
 
-# --- Test Execution ---
-echo "[Step 1/5] Starting Saleae Logic 2 application..."
-# Start the Logic 2 AppImage in the background. The '&' is key.
-# We redirect stdout and stderr to a log file to keep the console clean.
-nohup "$SALEAE_APP_PATH" --automation --automationPort $SALEAE_AUTOMATION_PORT > saleae.log 2>&1 &
-SALEAE_PID=$! # Get the Process ID of the background job
+    # --- Test Execution ---
+    echo "[Step 1/5] Starting Saleae Logic 2 application..."
+    # Start the Logic 2 AppImage in the background. The '&' is key.
+    # We redirect stdout and stderr to a log file to keep the console clean.
+    nohup "$SALEAE_APP_PATH" --automation --automationPort $SALEAE_AUTOMATION_PORT > saleae.log 2>&1 &
+    SALEAE_PID=$! # Get the Process ID of the background job
 
-# It's crucial to give the application time to launch before trying to connect.
-echo "Waiting for Saleae application to initialize (PID: $SALEAE_PID)..."
-sleep 10
+    # It's crucial to give the application time to launch before trying to connect.
+    echo "Waiting for Saleae application to initialize (PID: $SALEAE_PID)..."
+    sleep 10
 
-# Idle testing
-testing "idle"
+    # Idle testing
+    testing "idle"
 
-# Load testing
-testing "load"
+    # Load testing
+    testing "load"
 
-echo "Shutting down Saleae application..."
-# Gracefully shut down the Saleae application by sending a SIGTERM signal
-kill $SALEAE_PID
-sleep 5 # Give it time to shut down
-# If it's still running, force kill it
-if ps -p $SALEAE_PID > /dev/null; then
-   echo "Saleae did not shut down gracefully, forcing."
-   kill -9 $SALEAE_PID
-fi
-echo "Saleae application closed."
+    echo "Shutting down Saleae application..."
+    # Gracefully shut down the Saleae application by sending a SIGTERM signal
+    kill $SALEAE_PID
+    sleep 5 # Give it time to shut down
+    # If it's still running, force kill it
+    if ps -p $SALEAE_PID > /dev/null; then
+    echo "Saleae did not shut down gracefully, forcing."
+    kill -9 $SALEAE_PID
+    fi
+    echo "Saleae application closed."
 
-echo "--- Test Complete: ${TEST_NAME} ---"
-echo "Summary of results can be found in:"
-echo "${OUTPUT_DIR}"
-echo "----------------------------------------"
+    echo "--- Test Complete: ${TEST_NAME} ---"
+    echo "Summary of results can be found in:"
+    echo "${OUTPUT_DIR}"
+    echo "----------------------------------------"
 
-echo "--- Test result processing ---"
-processing
-echo "----------------------------------------"
+    echo "--- Test result processing ---"
+    processing
+    echo "----------------------------------------"
 
-exit 0
+    exit 0
+}
+
+# Invoke main
+main "$@"
