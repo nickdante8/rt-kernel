@@ -59,7 +59,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long type:,duration-s:,nominal-period-us: -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long test-type:,load-type:,load-type-all,duration-s:,nominal-period-us: -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -70,11 +70,23 @@ argument_parse() {
     # eval set -- "$PARSED_ARGS" assigns the parsed arguments back to the script's positional parameters.
     eval set -- "$PARSED_ARGS"
 
+    load_type_all_arg=FALSE
+    load_type_arg=""
+    test_type_arg=""
+
     while true; do
         case "$1" in
-            --type)
+            --test-type)
                 test_type_arg="$2"
                 shift 2
+                ;;
+            --load-type)
+                load_type_arg="$2"
+                shift 2
+                ;;
+            --load-type-all)
+                load_type_all_arg=TRUE
+                shift 1
                 ;;
             --nominal-period-us)
                 NOMINAL_PERIOD_US="$2"
@@ -82,6 +94,7 @@ argument_parse() {
                 ;;
             --duration-s)
                 CAPTURE_DURATION_S="$2"
+                SALEAE_CAPTURE_DURATION_S=$(($2 + 1))
                 shift 2
                 ;;
             --)
@@ -99,13 +112,29 @@ argument_parse() {
     # --- Test type and name ---
     if [ -n "$test_type_arg" ]; then
         if [ $test_type_arg = "rt" ]; then
-            TEST_NAME="${TEST_NAME_RT}_${DATE}"
-            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
+            TEST_TYPE="${TEST_TYPE_RT}"
+            TEST_TYPE_FOLDER_NAME="${TEST_TYPE_RT}_${DATE}"
+            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_TYPE_FOLDER_NAME}"
         elif [ $test_type_arg = "default" ]; then
-            TEST_NAME="${TEST_NAME_DEFAULT}_${DATE}"
-            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_NAME}"
+            TEST_TYPE="${TEST_TYPE_DEFAULT}"
+            TEST_TYPE_FOLDER_NAME="${TEST_TYPE_DEFAULT}_${DATE}"
+            OUTPUT_DIR="${SCRIPT_DIR}/test_results/${TEST_TYPE_FOLDER_NAME}"
         else
             echo "ERROR: --type argument accepts only 'rt' or 'default'."
+            exit 1
+        fi
+    fi
+
+    # --- Load type ---
+    if [[ "$load_type_all_arg" == "TRUE" ]]; then
+        LOAD_TYPE=("${LOAD_TYPE_ALL_LIST[@]}")
+    elif [[ -z "$load_type_arg" ]]; then
+        LOAD_TYPE=("${LOAD_TYPE_ALL_LIST[@]}")
+    else
+        if [[ " ${LOAD_TYPE_ALL_LIST[*]} " =~ " ${load_type_arg} " ]]; then
+            LOAD_TYPE="${load_type_arg}"
+        else
+            echo "ERROR: --load-type argument accepts only one of the following: ${LOAD_TYPE_ALL_LIST[@]}."
             exit 1
         fi
     fi
@@ -115,50 +144,58 @@ argument_parse() {
 
     # --- Display Final Configuration ---
     echo "--- Final Configuration ---"
-    echo "TEST_NAME: ${TEST_NAME}"
+    echo "TEST_TYPE: ${TEST_TYPE}"
+    echo "DATE: ${DATE}"
+    echo "TEST_TYPE_FOLDER_NAME: ${TEST_TYPE_FOLDER_NAME}"
+    echo "LOAD_TYPE: ${LOAD_TYPE}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
+    echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
     echo "---------------------------"
 }
 
 # Idle/load testing
 testing() {
-    if [ "$1" = "idle" ]; then
-        local TEST_TYPE="idle"
-        local TEST_ID="2"
-        echo "[Step ${TEST_ID}.2/5] Idle testing..."
-    elif [ "$1" = "load" ]; then
-        local TEST_TYPE="load"
-        local TEST_ID="3"
-        echo "[Step ${TEST_ID}.2/5] Load testing..."
-        #TODO: enter load testing activities here before starting script measurment
-    else
-        exit 1
-    fi
+    # Use local variable to go through all test types
+    local -n _load_type=$1
 
-    echo "[Step ${TEST_ID}.3/5]Starting led-toggle service on remote RPI..."
-    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl start ${LED_TOGGLE_SERVICE_CALL_NAME}"
+    echo " --- Testing --- "
+    # Parse throught them
+    for i in "${!_load_type[@]}"; do
+        local current_load_type="${_load_type[$i]}"
+        
+        echo "Processing index $i with value ${current_load_type}"
+        echo "[Step ${i}.1/5]Starting capture with Python script..."
+        # Run the python script to perform the capture.
+        # It will connect to the already running Logic 2 instance.
+        python3 "$PYTHON_MEASUREMENT_SCRIPT" \
+            --port "$SALEAE_AUTOMATION_PORT" \
+            --device "$SALEAE_DEVICE_ID" \
+            --duration-s "$SALEAE_CAPTURE_DURATION_S" \
+            --output-dir "$OUTPUT_DIR/$current_load_type" \
+            --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN" &
 
-    # Give the service a moment to initialize
-    sleep 1
+        echo "[Step ${i}.2/5]Starting testing script on remote RPI..."
+        sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
+            "echo '$(cat .sshpass)' | sudo -S bash \
+            ${REMOTE_TEST_SCRIPT_NAME} \
+            --test-type '${TEST_TYPE}' \
+            --load-type '${current_load_type}' \
+            --date-init '${DATE}' \
+            --duration-s '${CAPTURE_DURATION_S}' \
+            --nominal-period-us '${NOMINAL_PERIOD_US}'"
 
-    echo "[Step ${TEST_ID}.4/5]Starting capture with Python script..."
-    # Run the python script to perform the capture.
-    # It will connect to the already running Logic 2 instance.
-    python3 "$PYTHON_MEASUREMENT_SCRIPT" \
-        --port "$SALEAE_AUTOMATION_PORT" \
-        --device "$SALEAE_DEVICE_ID" \
-        --duration-s "$CAPTURE_DURATION_S" \
-        --output-dir "$OUTPUT_DIR/$TEST_TYPE" \
-        --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
+        sleep 1
+    done
+    echo " -------------- "
 
-    echo "[Step ${TEST_ID}.5/5]Stop led-toggle service on remote RPI..."
-    sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" "echo '$(cat .sshpass)' | sudo -S systemctl stop ${LED_TOGGLE_SERVICE_CALL_NAME}"
+    echo "  Retrieving log files from remote ..."
+    sshpass -f .sshpass scp -r \
+        "${RPI_USER}@${RPI_HOST}:${REMOTE_OUTPUT_DIR}/${TEST_TYPE_FOLDER_NAME}/*" \
+        "${OUTPUT_DIR}"
 
-    echo "  Retrieving log files from remote RPI..."
-    sshpass -f .sshpass scp "${RPI_USER}@${RPI_HOST}:/var/log/led-toggle.log" "${OUTPUT_DIR}/${TEST_NAME}.log"
-    echo "  Log file saved."
-    echo "  Test finished."
+    echo "  Log file[s] saved."
+    echo "  Tests[s] finished."
 }
 
 # Processing of obtained results
@@ -186,7 +223,7 @@ main() {
     argument_parse "$@"
 
     # Actual testing
-    echo "--- Starting Test: ${TEST_NAME} ---"
+    echo "--- Starting Test: ${TEST_TYPE_FOLDER_NAME} ---"
     echo "Capture duration: ${CAPTURE_DURATION_S} seconds"
 
     # Create a directory for the test results
@@ -202,13 +239,10 @@ main() {
 
     # It's crucial to give the application time to launch before trying to connect.
     echo "Waiting for Saleae application to initialize (PID: $SALEAE_PID)..."
-    sleep 10
+    sleep 5
 
     # Idle testing
-    testing "idle"
-
-    # Load testing
-    testing "load"
+    testing LOAD_TYPE
 
     echo "Shutting down Saleae application..."
     # Gracefully shut down the Saleae application by sending a SIGTERM signal
@@ -221,13 +255,13 @@ main() {
     fi
     echo "Saleae application closed."
 
-    echo "--- Test Complete: ${TEST_NAME} ---"
+    echo "--- Test Complete: ${TEST_TYPE_FOLDER_NAME} ---"
     echo "Summary of results can be found in:"
     echo "${OUTPUT_DIR}"
     echo "----------------------------------------"
 
     echo "--- Test result processing ---"
-    processing
+    # processing
     echo "----------------------------------------"
 
     exit 0

@@ -32,8 +32,7 @@ def main():
 
         print(f"Starting capture for {args.duration_s} seconds on channels {args.channels}...")
         # Start a capture. The capture will be automatically closed when leaving the `with` block.
-        # Note: The serial number 'A3E22C8E845D2C7D' is specific. For a general solution,
-        # you can omit the `device_id` argument to use the first available real device.
+        # For a general solution, you can omit the `device_id` argument to use the first available real device.
         with manager.start_capture(
                 device_id=args.device_id,
                 device_configuration=device_configuration,

@@ -124,12 +124,12 @@ int main(int argc, char **argv) {
         /* Notify about shuting down the service */
         syslog(LOG_INFO, "Service shutting down.");
         
-        /* leave pin state to high */
-        gpioWrite(SOFT_PIN, 1);
-    
         /* Turn off PWM */
         stop_hardware_pwm(HARD_PIN);
-    
+
+        /* leave pin state to high */
+        gpioWrite(SOFT_PIN, 1);
+        
         /* Close the pigpio and logging */
         gpioTerminate();
     }

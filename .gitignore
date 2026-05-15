@@ -2,7 +2,7 @@
 Logic.AppImage
 
 # Folders
-local-rtk/test_results/*
+local-rtk/test_results
 
 # Files
 local-rtk/saleae.log
