@@ -2,10 +2,10 @@
 Logic.AppImage
 
 # Folders
-local/test_results/*
+local-rtk/test_results/*
 
 # Files
-local/saleae.log
+local-rtk/saleae.log
 *.png
 
 # Bash specific
