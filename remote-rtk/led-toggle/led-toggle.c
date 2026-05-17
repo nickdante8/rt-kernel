@@ -1,14 +1,14 @@
-#include <pigpio.h>
 #include <stdio.h>
-#include <syslog.h>
-#include <signal.h>
-#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <syslog.h>
+#include <signal.h>
+#include <unistd.h>
+#include <time.h>
+#include <getopt.h>
+#include <pigpio.h>
 
-#define STD_OK      ((uint8_t)0U)
-#define STD_NOK     ((uint8_t)1U)
 #define STD_FALSE   ((uint8_t)0U)
 #define STD_TRUE    ((uint8_t)1U)
 
@@ -16,6 +16,21 @@
 #define HARD_PIN 18
 
 #define BASIC_FREQUENCY_1HZ ((uint32_t)1000000UL)
+
+typedef struct led_options {
+    uint32_t u32_period_us;
+    uint32_t u32_semi_period_us;
+    uint32_t u32_freq;
+    uint32_t u32_duty;
+    uint32_t u32_duration_s;
+} led_options_t;
+
+static struct option long_options[] = {
+    {"nominal-period-us",   required_argument, NULL, 'p'},
+    {"duration-s",          required_argument, NULL, 'd'},
+    {"help",                no_argument, NULL, 'h'},
+    {0, 0, 0, 0} /* Terminal element */
+};
 
 /* Global flag to control the loop */
 volatile sig_atomic_t keepRunning = 1;
@@ -44,50 +59,95 @@ void stop_hardware_pwm(int pin) {
     syslog(LOG_INFO, "Hardware PWM on pin %d fully disabled.", pin);
 }
 
+/* Helper function to get current time in seconds */
+double get_time_s(void) {
+    struct timespec ts;
+    /* CLOCK_MONOTONIC is the elapsed time since system boot */
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
+
+/* Handle passed arguments to the file */
+int arg_parse(int argc, char **argv, led_options_t *led_param) {
+    int exit_code = EXIT_SUCCESS;
+    int32_t arg_nr = 0;
+    int opt;
+    int option_index = 0;
+    
+    /* Extract arguments */
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s --nominal-period-us <us> --duration-s <sec>\n", argv[0]);
+    } else {
+        /* Loop through the arguments */
+        while (((opt = getopt_long(argc, argv, "p:d:h", long_options, &option_index)) != -1) && (exit_code != EXIT_FAILURE)) {
+            switch (opt) {
+                case 'p':
+                    arg_nr = strtol(optarg, NULL, 10);
+                    if (arg_nr <= 0) {
+                        fprintf(stderr, "Error: Period must be a positive integer: %s\n", optarg);
+                        exit_code = EXIT_FAILURE;
+                    } else {
+                        led_param->u32_period_us = arg_nr;
+                    }
+                    break;
+
+                case 'd':
+                    arg_nr = strtol(optarg, NULL, 10);
+                    if (arg_nr <= 0) {
+                        fprintf(stderr, "Error: Duration must be a positive integer: %s\n", optarg);
+                        exit_code = EXIT_FAILURE;
+                    } else {
+                        led_param->u32_duration_s = arg_nr;
+                    }
+                    break;
+                
+                case 'h':
+                default:
+                    fprintf(stderr, "Usage: %s --nominal-period-us <us> --duration-s <sec>\n", argv[0]);
+                    break;
+            }
+        }
+
+        /* Make sure that mandatory parameters are present */
+        if ((led_param->u32_duration_s == 0) || (led_param->u32_period_us == 0)) {
+            fprintf(stderr, "Both parameters are required.\n");
+            fprintf(stderr, "Usage: %s --nominal-period-us <us> --duration-s <sec>\n", argv[0]);
+            exit_code = EXIT_FAILURE;
+        }
+    }
+
+    return exit_code;
+}
+
 int main(int argc, char **argv) {
-    int exit_code = STD_OK;
+    int exit_code = EXIT_SUCCESS;
     int pigpio_initialized = STD_FALSE;
     struct sigaction action = { .sa_handler = signalHandler };
-    uint32_t lu32_frequency = 0UL;
-    uint32_t lu32_duty = 0UL;
-    uint32_t lu32_period = 0UL;
-    uint32_t lu32_semi_period = 0UL;
+    led_options_t led_param = {0};
+    double start_time = get_time_s();
+    double current_time = start_time;
+    double end_time = 0.0;
 
     /* Open a connection to the system logger */
     openlog("LedToggleService", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "GPIO Toggle Service started.");
+    syslog(LOG_INFO, "GPIO Toggle Service.");
 
     /* Catch the SIGTERM signal sent by 'systemctl stop' */
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGINT, &action, NULL);
 
-    /* Extract arguments */
-    if (argc != 2)
-    {
-        syslog(LOG_ERR, "Bad arguments. Expected 1 (period in us), got %d.", argc - 1);
-        exit_code = STD_NOK;
-    }
-    else
-    {
-        /* Extract the period */
-        lu32_period = (uint32_t)atoi(argv[1]);
-
-        /* Validate the extracted period to prevent issues with atoi returning 0 on error */
-        if (lu32_period == 0) {
-            syslog(LOG_ERR, "Invalid or zero period provided. Argument was: '%s'", argv[1]);
-            exit_code = STD_NOK;
-        }
-    }
+    /* Parse arguments */
+    exit_code = arg_parse(argc, argv, &led_param);
 
     /* Initialize pigpio */
-    if (exit_code == STD_OK) {
+    if (exit_code == EXIT_SUCCESS) {
         /* This prevents pigpio from handling signals, which we do ourselves */
         gpioCfgSetInternals(gpioCfgGetInternals() | PI_CFG_NOSIGHANDLER);
 
         if (gpioInitialise() < 0)
         {
             syslog(LOG_ERR, "Failed to initialize pigpio!");
-            exit_code = STD_NOK;
+            exit_code = EXIT_FAILURE;
         }
         else
         {
@@ -98,27 +158,35 @@ int main(int argc, char **argv) {
     /* Main logic */
     if (pigpio_initialized == STD_TRUE)
     {
-        /* Calculate periods */
-        lu32_semi_period = (uint32_t)(lu32_period / 2U);
-        lu32_frequency = BASIC_FREQUENCY_1HZ /lu32_period;
-        lu32_duty = PI_HW_PWM_RANGE / 2U;
+        /* Calculate end time and log it. */
+        end_time = start_time + (double)led_param.u32_duration_s;
 
-        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\n", lu32_semi_period, lu32_frequency, lu32_duty);
+        syslog(LOG_INFO, "Start time and end duration time is: %.1f and %.1f.", start_time, end_time);
+
+        /* Calculate periods */
+        led_param.u32_semi_period_us = (uint32_t)(led_param.u32_period_us / 2U);
+        led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
+        led_param.u32_duty = PI_HW_PWM_RANGE - PI_HW_PWM_RANGE / 2U;
+
+        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\n", led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty);
 
         /* Hardware PWM (GPIO 18) - 1Hz, 50% duty cycle */
-        gpioHardwarePWM(HARD_PIN, lu32_frequency, lu32_duty); 
+        gpioHardwarePWM(HARD_PIN, led_param.u32_freq, led_param.u32_duty); 
         syslog(LOG_INFO, "Hardware PWM initialized on GPIO 18.");
     
         gpioSetMode(SOFT_PIN, PI_OUTPUT);
     
-        while (keepRunning) {
+        while ((keepRunning) && (current_time < end_time)) {
             gpioWrite(SOFT_PIN, 1);
             syslog(LOG_DEBUG, "Soft Pin 17: HIGH");
-            usleep(lu32_semi_period);
+            usleep(led_param.u32_semi_period_us);
     
             gpioWrite(SOFT_PIN, 0);
             syslog(LOG_DEBUG, "Soft Pin 17: LOW");
-            usleep(lu32_semi_period);
+            usleep(led_param.u32_semi_period_us);
+
+            /* Update time */
+            current_time = get_time_s();
         }
     
         /* Notify about shuting down the service */

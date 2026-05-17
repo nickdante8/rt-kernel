@@ -139,9 +139,6 @@ argument_parse() {
         fi
     fi
 
-    # Create service call with parameter
-    LED_TOGGLE_SERVICE_CALL_NAME="led-toggle@\""${NOMINAL_PERIOD_US}"\".service"
-
     # --- Display Final Configuration ---
     echo "--- Final Configuration ---"
     echo "TEST_TYPE: ${TEST_TYPE}"
@@ -166,6 +163,16 @@ testing() {
         
         echo "Processing index $i with value ${current_load_type}"
         echo "[Step ${i}.1/5]Starting capture with Python script..."
+        echo "[Step ${i}.2/5]Starting testing script on remote RPI..."
+        sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
+            "echo '$(cat .sshpass)' | sudo -S bash \
+            ${REMOTE_TEST_START_SCRIPT_NAME} \
+            --test-type '${TEST_TYPE}' \
+            --load-type '${current_load_type}' \
+            --date-init '${DATE}' \
+            --duration-s '${CAPTURE_DURATION_S}' \
+            --nominal-period-us '${NOMINAL_PERIOD_US}'"
+
         # Run the python script to perform the capture.
         # It will connect to the already running Logic 2 instance.
         python3 "$PYTHON_MEASUREMENT_SCRIPT" \
@@ -175,17 +182,11 @@ testing() {
             --output-dir "$OUTPUT_DIR/$current_load_type" \
             --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN" &
 
-        echo "[Step ${i}.2/5]Starting testing script on remote RPI..."
-        sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
-            "echo '$(cat .sshpass)' | sudo -S bash \
-            ${REMOTE_TEST_SCRIPT_NAME} \
-            --test-type '${TEST_TYPE}' \
-            --load-type '${current_load_type}' \
-            --date-init '${DATE}' \
-            --duration-s '${CAPTURE_DURATION_S}' \
-            --nominal-period-us '${NOMINAL_PERIOD_US}'"
-
+        # Add a small sleep to prevent spike during the test
+        # After this, ideally, the tests on the remote must be finished
         sleep 1
+
+        # Check test state result
     done
     echo " -------------- "
 

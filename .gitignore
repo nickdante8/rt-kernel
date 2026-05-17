@@ -6,6 +6,7 @@ local-rtk/test_results
 
 # Files
 local-rtk/saleae.log
+test-exec-service-env
 *.png
 
 # Bash specific

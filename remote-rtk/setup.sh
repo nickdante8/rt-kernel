@@ -24,21 +24,21 @@ REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3")
 # Load environment variable of the script
 environment_var() {
     echo "--- Starting Environment Setup & Pre-flight Checks ---"
-    # --- .env_setup LOADING ---
-    # This safely loads the variables from .env_setup without touching other files
-    if [ -f "$SCRIPT_DIR/.env_setup" ]; then
+    # --- .env LOADING ---
+    # This safely loads the variables from .env without touching other files
+    if [ -f "$SCRIPT_DIR/.env" ]; then
         set -a
-        source "$SCRIPT_DIR/.env_setup"
+        source "$SCRIPT_DIR/.env"
         set +a
         echo "[✔] Environment variables loaded."
     else
-        echo "[!] No .env_setup file found. Using defaults."
+        echo "[!] No .env file found. Using defaults."
     fi
 }
 
 # Checks if a list of packages is installed and installs missing ones.
 # Arguments: None
-check_dependencies() {
+check_global_dependencies() {
     # Software dependencies
     local -n _required_ref=$1
     local -n _install_ref=$2
@@ -68,6 +68,108 @@ check_dependencies() {
     fi
 }
 
+# Checl led-toggle dependencies
+check_led_toggle_dependencies() {
+    # Check if Project file exists
+    if [ -f "${LED_PROJECT_LOCATION}/${LED_PROJECT_NAME}.c" ]; then
+        echo "${LED_PROJECT_LOCATION}/${LED_PROJECT_NAME}.c file exists. Continue..."
+    else
+        echo "${LED_PROJECT_LOCATION}/${LED_PROJECT_NAME}.c file doesn't exists. Check if the script is started from the right path."
+        exit 1
+    fi
+
+    # Set the right file mod
+    chmod +x ${LED_PROJECT_LOCATION}/build.sh
+
+    # Check if library is installed
+    echo "Checking for pigpio library..."
+
+    if [ -f "/usr/local/include/pigpio.h" ]; then
+        echo "pigpio is already installed (Version: $(pigpiod -v))"
+    else
+        echo "pigpio not found. Starting installation..."
+
+        # Update package list
+        sudo apt update
+        sudo apt install -y wget unzip make gcc
+
+        # Download and Build from source (Official abyz.me.uk method)
+        # Using a temporary directory to keep things clean
+        TEMP_DIR=$(mktemp -d)
+        cd "$TEMP_DIR" || exit
+
+        echo "Downloading pigpio source..."
+        wget https://github.com/joan2937/pigpio/archive/master.zip
+        unzip master.zip
+        cd pigpio-master || exit
+
+        echo "Compiling pigpio (this may take a few minutes)..."
+        make
+        sudo make install
+
+        # Clean up
+        cd /tmp
+        rm -rf "$TEMP_DIR"
+
+        echo "Status: pigpio installed successfully."
+
+        # Refresh library links
+        sudo ldconfig
+    fi
+
+    # Check if system service file exists to start/stop led-toggle
+    if [ -f "$LED_SERVICE_FILE_GLOBAL_PATH" ]; then
+        echo "Status: $LED_SERVICE_FILE_GLOBAL_PATH already exists. Skipping installation."
+    else
+        echo "Status: Installing system service..."
+
+        # Install the system service
+        tee "$LED_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
+[Unit]
+Description=Raspberry Pi GPIO Toggle Service
+After=network.target
+# Ensure we don't conflict with the standard pigpio daemon
+Conflicts=pigpiod.service
+
+[Service]
+# Real-Time Scheduling Configuration
+# This forces the kernel to prioritize this task over the network stack
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
+# Adjust the path to where binary is actually located
+ExecStartPre=/bin/sleep ${LED_SERVICE_DELAY_START_TIME}
+EnvironmentFile=${LED_SERVICE_ENV_FILE_PATH}
+ExecStart=${LED_TOGGLE_EXE_PATH} -p \${NOMINAL_PERIOD_US} -d \${CAPTURE_DURATION_S}
+WorkingDirectory=${LED_TOGGLE_WORKING_DIRECTORY}
+# Handling logs
+StandardOutput=append:/var/log/led-toggle.log
+StandardError=inherit
+# Shutdown behaviour
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+KillMode=process
+SuccessExitStatus=0
+Restart=no
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        echo "Status: File created. Finalizing systemd configuration..."
+
+        mv $LED_SERVICE_FILE_LOCAL_PATH $LED_SERVICE_FILE_GLOBAL_PATH
+        # Reload systemd to recognize the new file
+        systemctl daemon-reload
+
+        # Enable the service to start automatically on boot
+        systemctl enable ${LED_SERVICE_ENABLE_FILE_NAME}
+
+        echo "Success: ${LED_SERVICE_FILE_NAME} is now active and enabled."
+        echo "To start it run: sudo systemctl start ${LED_SERVICE_FILE_NAME}"
+    fi
+}
+
 
 # ==============================================================================
 # 3. MAIN LOGIC (The "Entry Point")
@@ -77,7 +179,8 @@ main() {
     sudo -v 
     
     environment_var
-    check_dependencies REQUIRED_PKG INSTALL_PKG
+    check_global_dependencies REQUIRED_PKG INSTALL_PKG
+    check_led_toggle_dependencies
 
     echo -e "\n[✔] Setup complete. System ready."
 }
