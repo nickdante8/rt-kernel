@@ -24,15 +24,15 @@ REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3")
 # Load environment variable of the script
 environment_var() {
     echo "--- Starting Environment Setup & Pre-flight Checks ---"
-    # --- .env LOADING ---
-    # This safely loads the variables from .env without touching other files
-    if [ -f "$SCRIPT_DIR/.env" ]; then
+    # --- .env_setup LOADING ---
+    # This safely loads the variables from .env_setup without touching other files
+    if [ -f "$SCRIPT_DIR/.env_setup" ]; then
         set -a
-        source "$SCRIPT_DIR/.env"
+        source "$SCRIPT_DIR/.env_setup"
         set +a
         echo "[✔] Environment variables loaded."
     else
-        echo "[!] No .env file found. Using defaults."
+        echo "[!] No .env_setup file found. Using defaults."
     fi
 }
 

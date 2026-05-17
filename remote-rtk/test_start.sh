@@ -22,8 +22,18 @@ cd "$SCRIPT_DIR"
 # ==============================================================================
 # Load environment variable of the script
 environment_var() {
+    # --- .env_setup LOADING ---
+    # This safely loads the variables from .env_setup without touching other files
+    if [ -f "$SCRIPT_DIR/.env_setup" ]; then
+        set -a
+        source "$SCRIPT_DIR/.env_setup"
+        set +a
+        echo "[✔] Environment variables loaded."
+    else
+        echo "[!] No .env_setup file found. Using defaults."
+    fi
+
     # --- .env LOADING ---
-    # This safely loads the variables from .env without touching other files
     if [ -f "$SCRIPT_DIR/.env" ]; then
         set -a
         source "$SCRIPT_DIR/.env"
@@ -48,7 +58,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long test-type:,load-type:,date-init:,duration-s:,nominal-period-us: -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us: -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -61,6 +71,10 @@ argument_parse() {
 
     while true; do
         case "$1" in
+            --setup)
+                SETUP_CHECK_ENABLE=TRUE
+                shift 1
+                ;;
             --test-type)
                 test_type_arg="$2"
                 shift 2
@@ -162,8 +176,10 @@ main() {
 
     # Set global variables, dependencies and parge arguments
     environment_var
-    setup_environment
     argument_parse "$@"
+    if [[ "${SETUP_CHECK_ENABLE}" == "TRUE" ]]; then
+        setup_environment
+    fi
     system_service_environment_variables
 
     # Actual testing
@@ -175,7 +191,7 @@ main() {
     echo "Results will be saved in: ${OUTPUT_DIR}/${LOAD_TYPE}"
     # Temporary
     touch ${OUTPUT_DIR}/${LOAD_TYPE}/file.log
-    sudo systemctl start ${LED_SERVICE_FILE_NAME}
+    sudo systemctl start ${LED_SERVICE_FILE_NAME} &
     echo "----------------------------------------"
 
     exit 0

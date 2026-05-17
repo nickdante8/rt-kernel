@@ -168,7 +168,8 @@ int main(int argc, char **argv) {
         led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
         led_param.u32_duty = PI_HW_PWM_RANGE - PI_HW_PWM_RANGE / 2U;
 
-        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\n", led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty);
+        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\n",
+            led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s);
 
         /* Hardware PWM (GPIO 18) - 1Hz, 50% duty cycle */
         gpioHardwarePWM(HARD_PIN, led_param.u32_freq, led_param.u32_duty); 

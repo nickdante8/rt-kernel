@@ -94,7 +94,7 @@ argument_parse() {
                 ;;
             --duration-s)
                 CAPTURE_DURATION_S="$2"
-                SALEAE_CAPTURE_DURATION_S=$(($2 + 1))
+                SALEAE_CAPTURE_DURATION_S=$(($2 + 2))
                 shift 2
                 ;;
             --)
@@ -180,7 +180,7 @@ testing() {
             --device "$SALEAE_DEVICE_ID" \
             --duration-s "$SALEAE_CAPTURE_DURATION_S" \
             --output-dir "$OUTPUT_DIR/$current_load_type" \
-            --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN" &
+            --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
 
         # Add a small sleep to prevent spike during the test
         # After this, ideally, the tests on the remote must be finished
@@ -220,8 +220,8 @@ main() {
 
     # Set global variables, dependencies and parge arguments
     environment_var
-    setup_environment
     argument_parse "$@"
+    setup_environment
 
     # Actual testing
     echo "--- Starting Test: ${TEST_TYPE_FOLDER_NAME} ---"

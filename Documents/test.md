@@ -42,7 +42,7 @@ gantt
     section local
         M1  :lm1, 00-00-500, 10s
         M1_MT1  :lm_mt1, after lm1, 1s
-        M1_MT2  :after lmt1, 1s
+        M1_MT2  :after lm_mt1, 1s
     Analysis start   : vert, v1, after rlt_mt1, 1s
     Analysis end     : vert, v2, after rlt1, 1s
 ```

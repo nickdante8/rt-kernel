@@ -48,6 +48,7 @@ def main():
             capture.export_raw_data_csv(
                 directory=args.output_dir,
                 digital_channels=args.channels,
+                iso8601_timestamp=True,
             )
             print(f"Exported measurements to {args.output_dir}")
 
