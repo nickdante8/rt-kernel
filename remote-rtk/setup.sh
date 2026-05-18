@@ -66,6 +66,41 @@ check_global_dependencies() {
     else
         echo "All dependencies are satified."
     fi
+
+    # Create variable setup file
+    echo "Status: Creating environment file for the system service..."
+    tee "${SETUP_FILE_CURRENT}" > /dev/null <<EOF
+# Global testing
+SYSTEM_SERVICE_ENV_VAR_FILE_NAME="${SYSTEM_SERVICE_ENV_VAR_FILE_NAME}"
+SYSTEM_SERVICE_ENV_VAR_FILE_PATH="${SYSTEM_SERVICE_ENV_VAR_FILE_PATH}"
+SETUP_FILE_CURRENT="${SETUP_FILE_CURRENT}"
+
+# LED project location
+LED_PROJECT_NAME="${LED_PROJECT_NAME}"
+LED_PROJECT_LOCATION="${LED_PROJECT_LOCATION}"
+LED_SERVICE_DELAY_START_TIME="${LED_SERVICE_DELAY_START_TIME}"
+LED_SERVICE_FILE_NAME="${LED_SERVICE_FILE_NAME}"
+LED_SERVICE_ENABLE_FILE_NAME="${LED_SERVICE_ENABLE_FILE_NAME}"
+LED_SERVICE_FILE_LOCAL_PATH="${LED_SERVICE_FILE_LOCAL_PATH}"
+LED_SERVICE_FILE_GLOBAL_PATH="${LED_SERVICE_FILE_GLOBAL_PATH}"
+LED_TOGGLE_WORKING_DIRECTORY="${LED_TOGGLE_WORKING_DIRECTORY}"
+LED_TOGGLE_EXE_PATH="${LED_TOGGLE_EXE_PATH}"
+LED_SERVICE_ENV_FILE_PATH="${LED_SERVICE_ENV_FILE_PATH}"
+
+# test exec service
+TEST_EXEC_PROJECT_NAME="${TEST_EXEC_PROJECT_NAME}"
+TEST_EXEC_PROJECT_LOCATION="${TEST_EXEC_PROJECT_LOCATION}"
+TEST_EXEC_SERVICE_DELAY_START_TIME="${TEST_EXEC_SERVICE_DELAY_START_TIME}"
+TEST_EXEC_SERVICE_FILE_NAME="${TEST_EXEC_SERVICE_FILE_NAME}"
+TEST_EXEC_SERVICE_ENABLE_FILE_NAME="${TEST_EXEC_SERVICE_ENABLE_FILE_NAME}"
+TEST_EXEC_SERVICE_FILE_LOCAL_PATH="${TEST_EXEC_SERVICE_FILE_LOCAL_PATH}"
+TEST_EXEC_SERVICE_FILE_GLOBAL_PATH="${TEST_EXEC_SERVICE_FILE_GLOBAL_PATH}"
+TEST_EXEC_WORKING_DIRECTORY="${TEST_EXEC_WORKING_DIRECTORY}"
+TEST_EXEC_EXE_PATH="${TEST_EXEC_EXE_PATH}"
+TEST_EXEC_START_PATH="${TEST_EXEC_START_PATH}"
+TEST_EXEC_STATE_PATH="${TEST_EXEC_STATE_PATH}"
+TEST_EXEC_SERVICE_ENV_FILE_PATH="${TEST_EXEC_SERVICE_ENV_FILE_PATH}"
+EOF
 }
 
 # Checl led-toggle dependencies
@@ -142,7 +177,7 @@ EnvironmentFile=${LED_SERVICE_ENV_FILE_PATH}
 ExecStart=${LED_TOGGLE_EXE_PATH} -p \${NOMINAL_PERIOD_US} -d \${CAPTURE_DURATION_S}
 WorkingDirectory=${LED_TOGGLE_WORKING_DIRECTORY}
 # Handling logs
-StandardOutput=append:/var/log/led-toggle.log
+StandardOutput=append:/var/log/${LED_PROJECT_NAME}.log
 StandardError=inherit
 # Shutdown behaviour
 KillSignal=SIGTERM
@@ -170,6 +205,62 @@ EOF
     fi
 }
 
+# Check test-exec service and file
+check_test_exec_dependencies() {
+    # Set the right file mod
+    chmod +x ${TEST_EXEC_EXE_PATH}
+    chmod +x ${TEST_EXEC_START_PATH}
+    chmod +x ${TEST_EXEC_STATE_PATH}
+
+    # Check if system service file exists
+    if [ -f "$TEST_EXEC_SERVICE_FILE_GLOBAL_PATH" ]; then
+        echo "Status: $TEST_EXEC_SERVICE_FILE_GLOBAL_PATH already exists. Skipping installation."
+    else
+        echo "Status: Installing system service..."
+
+        # Install the system service
+        tee "$TEST_EXEC_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
+[Unit]
+Description=Raspberry Pi Test execution Service
+After=network.target
+
+[Service]
+# This forces the kernel to prioritize this task over the network stack
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=99
+# Adjust the path to where binary is actually located
+ExecStartPre=/bin/sleep ${TEST_EXEC_SERVICE_DELAY_START_TIME}
+ExecStart=${TEST_EXEC_EXE_PATH}
+WorkingDirectory=${TEST_EXEC_WORKING_DIRECTORY}
+# Handling logs
+StandardOutput=append:/var/log/${TEST_EXEC_PROJECT_NAME}.log
+StandardError=inherit
+# Shutdown behaviour
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+KillMode=process
+SuccessExitStatus=0
+Restart=no
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+        echo "Status: File created. Finalizing systemd configuration..."
+
+        mv $TEST_EXEC_SERVICE_FILE_LOCAL_PATH $TEST_EXEC_SERVICE_FILE_GLOBAL_PATH
+        # Reload systemd to recognize the new file
+        systemctl daemon-reload
+
+        # Enable the service to start automatically on boot
+        systemctl enable ${TEST_EXEC_SERVICE_ENABLE_FILE_NAME}
+
+        echo "Success: ${TEST_EXEC_SERVICE_FILE_NAME} is now active and enabled."
+        echo "To start it run: sudo systemctl start ${TEST_EXEC_SERVICE_FILE_NAME}"
+    fi
+}
+
 
 # ==============================================================================
 # 3. MAIN LOGIC (The "Entry Point")
@@ -181,6 +272,7 @@ main() {
     environment_var
     check_global_dependencies REQUIRED_PKG INSTALL_PKG
     check_led_toggle_dependencies
+    check_test_exec_dependencies
 
     echo -e "\n[✔] Setup complete. System ready."
 }

@@ -162,11 +162,10 @@ testing() {
         local current_load_type="${_load_type[$i]}"
         
         echo "Processing index $i with value ${current_load_type}"
-        echo "[Step ${i}.1/5]Starting capture with Python script..."
-        echo "[Step ${i}.2/5]Starting testing script on remote RPI..."
+        echo "[Step ${i}.1/5]Starting testing script on remote RPI..."
         sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
             "echo '$(cat .sshpass)' | sudo -S bash \
-            ${REMOTE_TEST_START_SCRIPT_NAME} \
+            ${REMOTE_TEST_START_SCRIPT_PATH} \
             --test-type '${TEST_TYPE}' \
             --load-type '${current_load_type}' \
             --date-init '${DATE}' \
@@ -175,6 +174,7 @@ testing() {
 
         # Run the python script to perform the capture.
         # It will connect to the already running Logic 2 instance.
+        echo "[Step ${i}.2/5]Starting capture with Python script..."
         python3 "$PYTHON_MEASUREMENT_SCRIPT" \
             --port "$SALEAE_AUTOMATION_PORT" \
             --device "$SALEAE_DEVICE_ID" \
@@ -192,7 +192,7 @@ testing() {
 
     echo "  Retrieving log files from remote ..."
     sshpass -f .sshpass scp -r \
-        "${RPI_USER}@${RPI_HOST}:${REMOTE_OUTPUT_DIR}/${TEST_TYPE_FOLDER_NAME}/*" \
+        "${RPI_USER}@${RPI_HOST}:${REMOTE_TEST_OUTPUT_DIR}/${TEST_TYPE_FOLDER_NAME}/*" \
         "${OUTPUT_DIR}"
 
     echo "  Log file[s] saved."

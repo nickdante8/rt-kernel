@@ -23,14 +23,24 @@ cd "$SCRIPT_DIR"
 # Load environment variable of the script
 environment_var() {
     # --- .env LOADING ---
-    # This safely loads the variables from .env without touching other files
-    if [ -f "$SCRIPT_DIR/.env" ]; then
+    if [ -f "${SCRIPT_DIR}/.env" ]; then
         set -a
-        source "$SCRIPT_DIR/.env"
+        source "${SCRIPT_DIR}/.env"
         set +a
-        echo "[✔] Environment variables loaded."
+        echo "[✔] Environment variables loaded from ${SCRIPT_DIR}/.env."
     else
         echo "[!] No .env file found. Using defaults."
+    fi
+
+    # --- current setup file ---
+    if [ -f "${SETUP_FILE_CURRENT}" ]; then
+        set -a
+        source "${SETUP_FILE_CURRENT}"
+        set +a
+        echo "[✔] Setup variables loaded from ${SETUP_FILE_CURRENT}."
+    else
+        echo "[!] No ${SETUP_FILE_CURRENT} file found."
+        exit 1
     fi
 }
 
@@ -48,7 +58,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long test-type:,load-type:,date-init:,duration-s:,nominal-period-us: -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us: -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -61,6 +71,10 @@ argument_parse() {
 
     while true; do
         case "$1" in
+            --setup)
+                SETUP_CHECK_ENABLE=TRUE
+                shift 1
+                ;;
             --test-type)
                 test_type_arg="$2"
                 shift 2
@@ -127,10 +141,6 @@ argument_parse() {
             exit 1
         fi
     fi
-
-    # Create service call with parameter
-    LED_TOGGLE_SERVICE_START="led-toggle@${NOMINAL_PERIOD_US}.service"
-    LED_TOGGLE_SERVICE_STOP="led-toggle@*.service"
     
     # --- Display Final Configuration ---
     echo "--- Final Configuration ---"
@@ -144,6 +154,20 @@ argument_parse() {
     echo "---------------------------"
 }
 
+system_service_environment_variables() {
+    # Check if environment file for the system service exist
+    echo "Status: Creating environment file for the system service..."
+    tee "$SYSTEM_SERVICE_ENV_VAR_FILE_PATH" > /dev/null <<EOF
+# Environment variables used for the test
+TEST_TYPE="${TEST_TYPE}"
+LOAD_TYPE="${LOAD_TYPE}"
+DATE="${DATE}"
+NOMINAL_PERIOD_US="${NOMINAL_PERIOD_US}"
+CAPTURE_DURATION_S="${CAPTURE_DURATION_S}"
+TEST_TYPE_FOLDER_NAME="${TEST_TYPE_FOLDER_NAME}"
+OUTPUT_DIR="${OUTPUT_DIR}"
+EOF
+}
 
 # ==============================================================================
 # 3. MAIN LOGIC (The "Entry Point")
@@ -154,20 +178,23 @@ main() {
 
     # Set global variables, dependencies and parge arguments
     environment_var
-    setup_environment
     argument_parse "$@"
+    if [[ "${SETUP_CHECK_ENABLE}" == "TRUE" ]]; then
+        setup_environment
+    fi
+    system_service_environment_variables
 
     # Actual testing
     echo "--- Starting Test: ${TEST_TYPE_FOLDER_NAME}, ${LOAD_TYPE} ---"
 
     # Create a directory for the test results
     mkdir -p "${OUTPUT_DIR}/${LOAD_TYPE}"
+    cp ${SYSTEM_SERVICE_ENV_VAR_FILE_PATH} ${OUTPUT_DIR}/${LOAD_TYPE}
     echo "Results will be saved in: ${OUTPUT_DIR}/${LOAD_TYPE}"
-    # Temporary
-    sudo systemctl start ${LED_TOGGLE_SERVICE_START}
-    sleep ${CAPTURE_DURATION_S}
-    sudo systemctl stop ${LED_TOGGLE_SERVICE_STOP}
-    touch ${OUTPUT_DIR}/${LOAD_TYPE}/file.log
+    # Run healesly ${TEST_EXEC_SERVICE_FILE_NAME}
+    sudo systemctl start ${TEST_EXEC_SERVICE_FILE_NAME} &
+    # Run headlesly ${LED_SERVICE_FILE_NAME}
+    sudo systemctl start ${LED_SERVICE_FILE_NAME} &
     echo "----------------------------------------"
 
     exit 0
