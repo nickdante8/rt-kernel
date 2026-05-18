@@ -70,6 +70,61 @@ current_configuration() {
     echo "---------------------------"
 }
 
+# CPU, commands and interrupts measurement
+timing_measurement() {
+    # Background Logging
+    if [[ "$1" == "start" ]]; then
+        # Local variables to detect led-toggle start and record its pid
+        local led_pid=""
+        local timeout=1
+        local count=0
+
+        # Capture CPU per process
+        while [[ "${led_pid}" == "" ]]; do
+            if led_pid=$(pgrep led-toggle); then
+                echo "break"
+                break
+            fi
+            echo "${led_pid}"
+
+            # Small delay before next try
+            sleep 0.1
+            count=$((count + 1))
+
+            # Safety timeout for the script to not hang
+            if [ "$count" -ge $((timeout * 10)) ]; then
+                echo "ERROR: Timed out waiting for led-toggle service to start!"
+                exit 1
+            fi
+        done
+
+        echo "Found led-toggle PID: $Pled_pid}"
+        pidstat -p "${led_pid}",$(pgrep iperf3) -u -w 1 ${CAPTURE_DURATION_S} > "${OUTPUT_DIR}/${LOAD_TYPE}/pidstat.log" &
+        PID_STAT_PID=$!
+
+        # Capture System-wide SoftIRQs and Interrupts
+        mpstat -P ALL -n --dec=2 1 ${CAPTURE_DURATION_S} > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_cpu_net.log" &
+        MPSTAT_CPUNET_PID=$!
+        mpstat -I SUM -P ALL --dec=2 1 ${CAPTURE_DURATION_S} > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_interrupts.log" &
+        MPSTAT_INT_PID=$!
+
+        # Capture vmstat
+        vmstat -twn 1 ${CAPTURE_DURATION_S} > "${OUTPUT_DIR}/${LOAD_TYPE}/vmstat.log" &
+        VMSTAT_PID=$!
+
+        # Capture Interrupt Counts (Start)
+        cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_start.txt"
+
+        # Start cyclictest (Internal Latency)
+        cyclictest -m -a 0 -N -t1 -p99 i400 -D ${CAPTURE_DURATION_S} --json="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest_interval.json" -h 5000 --histfile="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest_hist.log" &
+        CYCLIC_PID=$!
+    else
+        # Cleanup and Finalize
+        cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_end.txt"
+        sudo kill -SIGKILL $CYCLIC_PID $VMSTAT_PID $MPSTAT_INT_PID $MPSTAT_CPUNET_PID $PID_STAT_PID || true
+    fi
+}
+
 
 # ==============================================================================
 # 3. MAIN LOGIC (The "Entry Point")
@@ -110,8 +165,12 @@ EOF
         exit 1
     fi
 
+    timing_measurement "start"
+
     # Temporary
     sleep $((CAPTURE_DURATION_S + 2))
+
+    timing_measurement "stop"
 
     # Temporary
     cat <<EOF >> "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"

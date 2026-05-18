@@ -174,7 +174,7 @@ CPUSchedulingPriority=99
 # Adjust the path to where binary is actually located
 ExecStartPre=/bin/sleep ${LED_SERVICE_DELAY_START_TIME}
 EnvironmentFile=${LED_SERVICE_ENV_FILE_PATH}
-ExecStart=${LED_TOGGLE_EXE_PATH} -p \${NOMINAL_PERIOD_US} -d \${CAPTURE_DURATION_S}
+ExecStart=${LED_TOGGLE_EXE_PATH} -p \${NOMINAL_PERIOD_US} -d \${CAPTURE_DURATION_S} -o \${OUTPUT_DIR}/\${LOAD_TYPE}
 WorkingDirectory=${LED_TOGGLE_WORKING_DIRECTORY}
 # Handling logs
 StandardOutput=append:/var/log/${LED_PROJECT_NAME}.log
