@@ -2,9 +2,9 @@
 sequenceDiagram
     loop each requested --load-type
         local-rtk->>+remote-rtk: Run test_start.sh with a set of arguments<br>(--test-type, --load-type, --date-init, --duration-s, --nominal-period-us
-        Note right of remote-rtk: Create env file test-exec-env<br>with received arguments
-        Note right of remote-rtk: Start test-exec.service with all<br>environment variables from test-exec-env.<br>It shall run with a 2xMT margin longer.
-        Note right of remote-rtk: Start led-toggle.service with<br>--nominal-period-us, --duration-s<br><br>It must log timestamps of first and last edges<br>of the periods to RAM. Then to file.<br><br>It shall start running after a delay of MT margin.
+        Note right of remote-rtk: Create env file '.setup_file_current'<br>with received arguments
+        Note right of remote-rtk: Start test-exec.service with all<br>environment variables from '.setup_file_current'.<br>It shall run with a 2xMT margin longer.
+        Note right of remote-rtk: Start led-toggle.service with<br>--nominal-period-us, --duration-s, --output<br><br>It must log timestamps of first and last edges<br>of the periods to RAM. Then to file.<br><br>It shall start running after a delay of MT margin.
         remote-rtk-->>-local-rtk: Success/Fail status of creating file and starting services
         Note left of local-rtk: Python script starts saelae measurement<br>on set --duration-s
         Note left of local-rtk: This execution is blocking mode.<br>It stays in the script until it is done measuring.
@@ -12,7 +12,7 @@ sequenceDiagram
         Note over local-rtk: Wait a designated margin
         Note left of local-rtk: Measurement done and stopped for saleae
         Note right of remote-rtk: led-toggle and test-exec finished (idealy)
-        loop (finished reponse not receved || timeout not reached):
+        loop (finished reponse not receved || timeout not reached)
             local-rtk->>+remote-rtk: Run test_state.sh to get test result
             Note right of remote-rtk: Service status of led-toggle@period.service
             Note right of remote-rtk: Service status of test-exec.service
