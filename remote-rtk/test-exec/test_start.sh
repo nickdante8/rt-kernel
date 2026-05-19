@@ -58,7 +58,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us: -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us:,relative-toggle-time -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -68,6 +68,11 @@ argument_parse() {
 
     # eval set -- "$PARSED_ARGS" assigns the parsed arguments back to the script's positional parameters.
     eval set -- "$PARSED_ARGS"
+
+    local test_type_arg=""
+    local load_type_arg=""
+    local date_init_arg=""
+    local led_relative_toggle_time=""
 
     while true; do
         case "$1" in
@@ -94,6 +99,10 @@ argument_parse() {
             --duration-s)
                 CAPTURE_DURATION_S="$2"
                 shift 2
+                ;;
+            --relative-toggle-time)
+                led_relative_toggle_time="-r"
+                shift 1
                 ;;
             --)
                 shift
@@ -141,6 +150,8 @@ argument_parse() {
             exit 1
         fi
     fi
+
+    LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
     
     # --- Display Final Configuration ---
     echo "--- Final Configuration ---"
@@ -150,6 +161,7 @@ argument_parse() {
     echo "LOAD_TYPE: ${LOAD_TYPE}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
+    echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
     echo "---------------------------"
 }
@@ -166,6 +178,7 @@ NOMINAL_PERIOD_US="${NOMINAL_PERIOD_US}"
 CAPTURE_DURATION_S="${CAPTURE_DURATION_S}"
 TEST_TYPE_FOLDER_NAME="${TEST_TYPE_FOLDER_NAME}"
 OUTPUT_DIR="${OUTPUT_DIR}"
+LED_TOGGLE_OPTIONAL_PARAMS=${LED_TOGGLE_OPTIONAL_PARAMS}
 EOF
 }
 
@@ -180,6 +193,7 @@ main() {
     environment_var
     argument_parse "$@"
     if [[ "${SETUP_CHECK_ENABLE}" == "TRUE" ]]; then
+        echo "Running setup checks"
         setup_environment
     fi
     system_service_environment_variables

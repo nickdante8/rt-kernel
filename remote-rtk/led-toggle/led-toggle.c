@@ -31,22 +31,29 @@ typedef struct led_options {
     uint32_t u32_freq;
     uint32_t u32_duty;
     uint32_t u32_duration_s;
+    bool b_relative_sleep;
 } led_options_t;
 
 typedef struct edges_timestamp {
-    double start_edges[EDGES_COUNT];
-    double end_edges[EDGES_COUNT];
+    double start_timestamp[EDGES_COUNT];
+    double end_timestamp[EDGES_COUNT];
     uint32_t start_edge_count;
     uint32_t total_edge_count;
+    uint8_t start_state[EDGES_COUNT];
+    uint8_t end_state[EDGES_COUNT];
 } edges_timestamp_t;
 
 static struct option long_options[] = {
     {"nominal-period-us",   required_argument, NULL, 'p'},
     {"duration-s",          required_argument, NULL, 'd'},
     {"output",              required_argument, NULL, 'o'},
+    {"relative-toggle-time",no_argument, NULL, 'r'},
     {"help",                no_argument, NULL, 'h'},
     {0, 0, 0, 0} /* Terminal element */
 };
+
+typedef struct timespec timespec_t;
+typedef void (*fptr_sleep)(uint32_t, timespec_t *);
 
 /* Global flag to control the loop */
 volatile sig_atomic_t keepRunning = 1;
@@ -79,7 +86,7 @@ void stop_hardware_pwm(int pin) {
 
 /* Helper function to get current time in seconds */
 double get_time_s(void) {
-    struct timespec ts;
+    timespec_t ts;
 
     /* CLOCK_MONOTONIC is the elapsed time since system boot */
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -87,16 +94,37 @@ double get_time_s(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
 }
 
-void save_edge(edges_timestamp_t *et, double timestamp) {
+/* Relative time measurement to the next toggle */
+void relative_sleep(uint32_t delay_us, timespec_t *time) {
+    (void)time;
+    usleep(delay_us);
+}
+
+/* Absolute time measurement to the next toggle */
+void absolute_sleep(uint32_t delay_us, timespec_t *next_wakeup) {
+    /* Calculate exactly when the next rising edge MUST happen */
+    next_wakeup->tv_nsec += delay_us * 1000UL;
+    while (next_wakeup->tv_nsec >= 1000000000L) {
+        next_wakeup->tv_sec++;
+        next_wakeup->tv_nsec -= 1000000000L;
+    }
+
+    /* Sleep time */
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, next_wakeup, NULL);
+}
+
+void save_edge(edges_timestamp_t *et, double timestamp, uint8_t edge_state) {
     /* Save to start edge */
     if (et->start_edge_count < EDGES_COUNT) {
-        et->start_edges[et->start_edge_count] = timestamp;
+        et->start_timestamp[et->start_edge_count] = timestamp;
+        et->start_state[et->start_edge_count] = edge_state;
         /* Increase the start edge count */
         et->start_edge_count++;
     }
 
     /* Otherwise to end edge */
-    et->end_edges[et->total_edge_count % EDGES_COUNT] = timestamp;
+    et->end_timestamp[et->total_edge_count % EDGES_COUNT] = timestamp;
+    et->end_state[et->total_edge_count % EDGES_COUNT] = edge_state;
     et->total_edge_count++;
 }
 
@@ -111,20 +139,19 @@ void finalize_and_save_logs(edges_timestamp_t *et, char *output_path) {
         return;
     }
 
-    fprintf(sync_file, "[START_SIGNATURE]\n");
+    fprintf(sync_file, "Time,Channel 0,Edge number\n");
     for (uint32_t i = 0; i < et->start_edge_count; i++) {
-        fprintf(sync_file, "edge_%d=%.9f\n", i, et->start_edges[i]);
+        fprintf(sync_file, "%.9f,%u,%u\n", et->start_timestamp[i], et->start_state[i], i);
     }
-
-    fprintf(sync_file, "\n[END_SIGNATURE]\n");
     
     /* If we haven't even filled the buffer once, wrap around gracefully */
     uint32_t count_to_print = (et->total_edge_count < EDGES_COUNT) ? et->total_edge_count : EDGES_COUNT;
     
     for (uint32_t i = 0; i < count_to_print; i++) {
         /* Chronological calculation: work backwards from the final edge count */
-        uint32_t index = (et->total_edge_count - count_to_print + i) % EDGES_COUNT;
-        fprintf(sync_file, "edge_%d=%.9f\n", i, et->end_edges[index]);
+        uint32_t edge_nr = et->total_edge_count - count_to_print + i;
+        uint32_t index = edge_nr % EDGES_COUNT;
+        fprintf(sync_file, "%.9f,%u,%u\n", et->end_timestamp[index], et->end_state[index], edge_nr);
     }
 
     fclose(sync_file);
@@ -136,10 +163,13 @@ int is_directory_valid(const char *path) {
     struct stat statbuf;
 
     /* Check if path exists */
-    if ((stat(path, &statbuf) != 0)
-            /* Check if the path is a directory (and not a regular file) */
-            && (S_ISDIR(statbuf.st_mode) != STD_TRUE)) {
+    if (stat(path, &statbuf) != 0) {
         /* Path does not exist or can't be accessed */
+        exit_code = EXIT_FAILURE;
+    }
+    
+    /* Check if the path is a directory (and not a regular file) */
+    if (S_ISDIR(statbuf.st_mode) != STD_TRUE) {
         exit_code = EXIT_FAILURE;
     }
 
@@ -150,8 +180,8 @@ int is_directory_valid(const char *path) {
 void print_usage(const char *prog_name) {
     fprintf(stderr, "Usage: %s --nominal-period-us <us> --duration-s <sec> --output <path>\n", prog_name);
     fprintf(stderr, "All three arguments are strictly required.\n");
-    syslog(LOG_INFO, "Usage: %s --nominal-period-us <us> --duration-s <sec> --output <path>\n", prog_name);
-    syslog(LOG_INFO, "All three arguments are strictly required.\n");
+    syslog(LOG_ERR, "Usage: %s --nominal-period-us <us> --duration-s <sec> --output <path>\n", prog_name);
+    syslog(LOG_ERR, "All three arguments are strictly required.\n");
 }
 
 /* Handle passed arguments to the file */
@@ -166,7 +196,7 @@ int arg_parse(int argc, char **argv, led_options_t *led_param, char *output_path
     /* Extract arguments */
     if ((argv != NULL) && (led_param != NULL) && (output_path != NULL)) {
         /* Loop through the arguments */
-        while (((opt = getopt_long(argc, argv, "p:d:o:h", long_options, &option_index)) != -1) && (exit_code != EXIT_FAILURE)) {
+        while (((opt = getopt_long(argc, argv, "rp:d:o:h", long_options, &option_index)) != -1) && (exit_code != EXIT_FAILURE)) {
             switch (opt) {
                 case 'p':
                     arg_nr = strtol(optarg, &endptr, 10);
@@ -199,11 +229,20 @@ int arg_parse(int argc, char **argv, led_options_t *led_param, char *output_path
                         exit_code = EXIT_FAILURE;
                     } else {
                         /* Create output full path with file */
-                        strncpy(output_path, tmp_path, PATH_MAX_LEN - 1U);
-                        strcat(output_path, "/led_toggle_edges.txt");
+                        int written = snprintf(output_path, PATH_MAX_LEN, "%s/led_toggle_edges.csv", tmp_path);
+                        if ((written < 0) || ((size_t)written >= PATH_MAX_LEN)) {
+                            fprintf(stderr, "Error: Resulting output file path exceeds safe buffer allocations.\n");
+                            exit_code = EXIT_FAILURE;
+                        }
                     }
                     break;
                 
+                case 'r':
+                    fprintf(stdout, "Relative toggle time is selected.\n");
+                    syslog(LOG_INFO, "Relative toggle time is selected.\n");
+                    led_param->b_relative_sleep = true;
+                    break;
+
                 case 'h':
                 default:
                     print_usage(argv[0]);
@@ -234,6 +273,10 @@ int main(int argc, char **argv) {
     char output_path[PATH_MAX_LEN] = {0};
     /* Synchronization tracking arrays with edges timestamp */
     edges_timestamp_t et = {0};
+
+    /* Time wakeup */
+    timespec_t next_wakeup;
+    fptr_sleep time_sleep_ptr = NULL;
 
     /* Time related variables */
     double start_time = get_time_s();
@@ -273,30 +316,42 @@ int main(int argc, char **argv) {
         /* Calculate end time and log it. */
         end_time = start_time + (double)led_param.u32_duration_s;
 
-        syslog(LOG_INFO, "Start time and end duration time is: %.1f and %.1f.", start_time, end_time);
+        syslog(LOG_INFO, "Start time and end duration time is: %.9f and %.9f.", start_time, end_time);
 
         /* Calculate periods */
         led_param.u32_semi_period_us = (uint32_t)(led_param.u32_period_us / 2U);
         led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
         led_param.u32_duty = PI_HW_PWM_RANGE - PI_HW_PWM_RANGE / 2U;
 
-        syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\nPath:%s",
-            led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s, output_path);
+        /* Summary running information */
+        if (led_param.b_relative_sleep == true) {
+            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s, output_path, "relative");
+            time_sleep_ptr = relative_sleep;
+        } else {
+            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s, output_path, "absolute");
+            time_sleep_ptr = absolute_sleep;
+        }
 
         /* Hardware PWM (GPIO 18) - 1Hz, 50% duty cycle */
         gpioHardwarePWM(HARD_PIN, led_param.u32_freq, led_param.u32_duty); 
         syslog(LOG_INFO, "Hardware PWM initialized on GPIO 18.");
     
         gpioSetMode(SOFT_PIN, PI_OUTPUT);
+
+        /* Initialize the baseline timestamp exactly ONCE before the loop */
+        clock_gettime(CLOCK_MONOTONIC, &next_wakeup);
     
+        /* Main toggle loop */
         while ((keepRunning) && (current_time < end_time)) {
-            save_edge(&et, get_time_s());
-            gpioWrite(SOFT_PIN, 1);
-            usleep(led_param.u32_semi_period_us);
+            save_edge(&et, get_time_s(), PI_HIGH);
+            gpioWrite(SOFT_PIN, PI_HIGH);
+            time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
     
-            save_edge(&et, get_time_s());
-            gpioWrite(SOFT_PIN, 0);
-            usleep(led_param.u32_semi_period_us);
+            save_edge(&et, get_time_s(), PI_LOW);
+            gpioWrite(SOFT_PIN, PI_LOW);
+            time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
 
             /* Update time */
             current_time = get_time_s();

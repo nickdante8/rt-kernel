@@ -14,7 +14,7 @@ sequenceDiagram
         Note right of remote-rtk: led-toggle and test-exec finished (idealy)
         loop (finished reponse not receved || timeout not reached)
             local-rtk->>+remote-rtk: Run test_state.sh to get test result
-            Note right of remote-rtk: Service status of led-toggle@period.service
+            Note right of remote-rtk: Service status of led-toggle.service
             Note right of remote-rtk: Service status of test-exec.service
             remote-rtk-->>-local-rtk: Send a response (finished/failed/running)
         end
@@ -46,3 +46,10 @@ gantt
     Analysis start   : vert, v1, after rlt_mt1, 1s
     Analysis end     : vert, v2, after rlt1, 1s
 ```
+
+| Setup | Jitter (Cycle-to-Cycle variation) | Drift (Long-term phase shift) | Why? |
+| -------- | ------- | ------- | ------- |
+| Baseline + usleep | SEVERE | SEVERE | Network softirqs delay the usleep wake-up. The delay stacks cumulatively every cycle. |
+| Baseline + ABSTIME | SEVERE | NONE | "Softirqs still delay the wake-up, causing edge jitter. But the absolute timer forces the next cycle to shorten, preventing long-term drift." |
+| PREEMPT_RT + usleep | LOW | MODERATE | "The RT kernel preempts the network traffic, so the wake-up is fast. But the 1μs C-code execution time still stacks every cycle, causing slow drift." |
+| PREEMPT_RT + ABSTIME | LOW | NONE | "The Holy Grail. RT Kernel guarantees fast wake-up, and absolute timers guarantee perfect synchronization with the Saleae over infinite time." |

@@ -59,7 +59,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long test-type:,load-type:,load-type-all,duration-s:,nominal-period-us: -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long test-type:,load-type:,load-type-all,duration-s:,nominal-period-us:,relative-toggle-time -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -70,9 +70,10 @@ argument_parse() {
     # eval set -- "$PARSED_ARGS" assigns the parsed arguments back to the script's positional parameters.
     eval set -- "$PARSED_ARGS"
 
-    load_type_all_arg=FALSE
-    load_type_arg=""
-    test_type_arg=""
+    local test_type_arg=""
+    local load_type_arg=""
+    local load_type_all_arg=FALSE
+    local led_relative_toggle_time=""
 
     while true; do
         case "$1" in
@@ -96,6 +97,10 @@ argument_parse() {
                 CAPTURE_DURATION_S="$2"
                 SALEAE_CAPTURE_DURATION_S=$(($2 + 2))
                 shift 2
+                ;;
+            --relative-toggle-time)
+                led_relative_toggle_time="--relative-toggle-time"
+                shift 1
                 ;;
             --)
                 shift
@@ -139,6 +144,8 @@ argument_parse() {
         fi
     fi
 
+    LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
+
     # --- Display Final Configuration ---
     echo "--- Final Configuration ---"
     echo "TEST_TYPE: ${TEST_TYPE}"
@@ -147,6 +154,7 @@ argument_parse() {
     echo "LOAD_TYPE: ${LOAD_TYPE}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
+    echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
     echo "---------------------------"
 }
@@ -163,6 +171,8 @@ testing() {
         
         echo "Processing index $i with value ${current_load_type}"
         echo "[Step ${i}.1/5]Starting testing script on remote RPI..."
+        # Add --relative-toggle-time option if relative time toggle of the pin is required
+        # Implicitely, only the absolute tome toggle of the pin will be used
         sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
             "echo '$(cat .sshpass)' | sudo -S bash \
             ${REMOTE_TEST_START_SCRIPT_PATH} \
@@ -170,8 +180,9 @@ testing() {
             --load-type '${current_load_type}' \
             --date-init '${DATE}' \
             --duration-s '${CAPTURE_DURATION_S}' \
-            --nominal-period-us '${NOMINAL_PERIOD_US}'"
-
+            --nominal-period-us '${NOMINAL_PERIOD_US}' \
+            ${LED_TOGGLE_OPTIONAL_PARAMS}"
+        
         # Run the python script to perform the capture.
         # It will connect to the already running Logic 2 instance.
         echo "[Step ${i}.2/5]Starting capture with Python script..."
