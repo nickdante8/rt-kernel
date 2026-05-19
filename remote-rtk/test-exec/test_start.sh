@@ -153,17 +153,17 @@ argument_parse() {
 
     LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
     
-    # --- Display Final Configuration ---
-    echo "--- Final Configuration ---"
+    # --- Display Current Configuration ---
+    echo "==== Current Configuration ===="
     echo "TEST_TYPE: ${TEST_TYPE}"
     echo "DATE: ${DATE}"
     echo "TEST_TYPE_FOLDER_NAME: ${TEST_TYPE_FOLDER_NAME}"
-    echo "LOAD_TYPE: ${LOAD_TYPE}"
+    echo "LOAD_TYPE: ${LOAD_TYPE[*]}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
     echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
-    echo "---------------------------"
+    echo "***************************"
 }
 
 system_service_environment_variables() {
@@ -209,7 +209,7 @@ main() {
     sudo systemctl start ${TEST_EXEC_SERVICE_FILE_NAME} &
     # Run headlesly ${LED_SERVICE_FILE_NAME}
     sudo systemctl start ${LED_SERVICE_FILE_NAME} &
-    echo "----------------------------------------"
+    echo "========================================"
 
     exit 0
 }

@@ -58,16 +58,17 @@ environment_var() {
 # This section will parse command-line arguments and override any values
 # set by the initial defaults or the .env file.
 current_configuration() {
-    # --- Display Final Configuration ---
-    echo "--- Final Configuration ---"
+    # --- Display Current Configuration ---
+    echo "==== Current Configuration ===="
     echo "TEST_TYPE: ${TEST_TYPE}"
     echo "DATE: ${DATE}"
     echo "TEST_TYPE_FOLDER_NAME: ${TEST_TYPE_FOLDER_NAME}"
-    echo "LOAD_TYPE: ${LOAD_TYPE}"
+    echo "LOAD_TYPE: ${LOAD_TYPE[*]}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
+    echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
-    echo "---------------------------"
+    echo "***************************"
 }
 
 # CPU, commands and interrupts measurement
@@ -82,10 +83,9 @@ timing_measurement() {
         # Capture CPU per process
         while [[ "${led_pid}" == "" ]]; do
             if led_pid=$(pgrep led-toggle); then
-                echo "break"
+                echo "${led_pid} break"
                 break
             fi
-            echo "${led_pid}"
 
             # Small delay before next try
             sleep 0.1
@@ -138,7 +138,7 @@ main() {
     current_configuration
 
     # Actual testing
-    echo "--- Executing Test: ${TEST_TYPE_FOLDER_NAME}, ${LOAD_TYPE} ---"
+    echo "=== Executing Test: ${TEST_TYPE_FOLDER_NAME}, ${LOAD_TYPE} ==="
 
     # Temporary
     cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"
@@ -177,7 +177,7 @@ EOF
 $(date +%Y-%m-%d-%H:%M:%S.%N)
 EOF
 
-    echo "----------------------------------------"
+    echo "========================================"
 
     exit 0
 }

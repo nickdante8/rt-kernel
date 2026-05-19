@@ -146,17 +146,17 @@ argument_parse() {
 
     LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
 
-    # --- Display Final Configuration ---
-    echo "--- Final Configuration ---"
+    # --- Display Current Configuration ---
+    echo "---- Current Configuration ----"
     echo "TEST_TYPE: ${TEST_TYPE}"
     echo "DATE: ${DATE}"
     echo "TEST_TYPE_FOLDER_NAME: ${TEST_TYPE_FOLDER_NAME}"
-    echo "LOAD_TYPE: ${LOAD_TYPE}"
+    echo "LOAD_TYPE: ${LOAD_TYPE[*]}"
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
     echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
-    echo "---------------------------"
+    echo "***************************"
 }
 
 # Idle/load testing
@@ -164,18 +164,17 @@ testing() {
     # Use local variable to go through all test types
     local -n _load_type=$1
 
-    echo " --- Testing --- "
+    echo "----------- Testing -----------"
     # Parse throught them
     for i in "${!_load_type[@]}"; do
         local current_load_type="${_load_type[$i]}"
+        echo "-------- ${current_load_type} --------"
         
-        echo "Processing index $i with value ${current_load_type}"
         echo "[Step ${i}.1/5]Starting testing script on remote RPI..."
         # Add --relative-toggle-time option if relative time toggle of the pin is required
         # Implicitely, only the absolute tome toggle of the pin will be used
         sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
-            "echo '$(cat .sshpass)' | sudo -S bash \
-            ${REMOTE_TEST_START_SCRIPT_PATH} \
+            "echo '$(cat .sshpass)' | sudo -S bash ${REMOTE_TEST_START_SCRIPT_PATH} \
             --test-type '${TEST_TYPE}' \
             --load-type '${current_load_type}' \
             --date-init '${DATE}' \
@@ -198,8 +197,10 @@ testing() {
         sleep 1
 
         # Check test state result
+        sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
+            "echo '$(cat .sshpass)' | sudo -S bash ${REMOTE_TEST_STATE_SCRIPT_PATH}"
     done
-    echo " -------------- "
+    echo "-------------------------------------"
 
     echo "  Retrieving log files from remote ..."
     sshpass -f .sshpass scp -r \
@@ -268,13 +269,14 @@ main() {
     echo "Saleae application closed."
 
     echo "--- Test Complete: ${TEST_TYPE_FOLDER_NAME} ---"
+
     echo "Summary of results can be found in:"
     echo "${OUTPUT_DIR}"
-    echo "----------------------------------------"
+    echo "***********************************************"
 
     echo "--- Test result processing ---"
     # processing
-    echo "----------------------------------------"
+    echo "******************************"
 
     exit 0
 }
