@@ -52,32 +52,26 @@ def plot_duty_cycle(plots_idle, plots_load):
 def main():
     # --- Argument Parsing ---
     parser = argparse.ArgumentParser(description="Automate processing of Saleae capture.")
+    parser.add_argument('--test-type', type=str, required=True, help='Type of test, like: idle, load-net, load-usb and so on.')
+    parser.add_argument('--loads-type', type=str, nargs='+', required=True, help='List of load typeds used to capture data.')
     parser.add_argument('--nominal-period-us', type=int, required=True, help='Nominal period in seconds.')
     parser.add_argument('--duration-s', type=float, required=True, help='Capture duration in seconds.')
     parser.add_argument('--input-dir', type=str, required=True, help='Directory to process captureed and exported data.')
     parser.add_argument('--channels', type=int, nargs='+', required=True, help='List of digital channels used for capture.')
     args = parser.parse_args()
 
-    test_type = os.path.basename(os.path.normpath(args.input_dir))
-    if "default" in test_type:
-        test_type = "default"
-    elif "rt" in test_type:
-        test_type = "rt"
-    else:
-        exit(1)
-
     # Create array of data to use in the loop
     plots = []
-    for load_type in ["idle", "load"]:
+    for load_type in args.loads_type:
         for channel in args.channels:
-            plots.append(proc.Plot_obj(args.input_dir, test_type, load_type, channel, args.nominal_period_us))
+            plots.append(proc.Plot_obj(args.input_dir, args.test_type, load_type, channel, args.nominal_period_us, args.duration_s))
 
     # --- Data Analysis ---
     # Separate to idle and load
     plots_idle = [obj for obj in plots if obj.load_type == "idle"]
     phase_idle = proc.perform_phase_shift_analysis(plots_idle[0].result['edges_rise'], plots_idle[1].result['edges_rise'], args.nominal_period_us)
 
-    plots_load = [obj for obj in plots if obj.load_type == "load"]
+    plots_load = [obj for obj in plots if obj.load_type == "load-net"]
     phase_load = proc.perform_phase_shift_analysis(plots_load[0].result['edges_rise'], plots_load[1].result['edges_rise'], args.nominal_period_us)
 
     # Plot histograms

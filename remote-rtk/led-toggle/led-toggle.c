@@ -69,17 +69,14 @@ void signalHandler(int signum) {
 
 /* Stoping hardware PWM */
 void stop_hardware_pwm(int pin) {
-    /* Set frequency and duty cycle to 0 */
-    gpioHardwarePWM(pin, 0, 0); 
-    
-    /* Small delay to allow the hardware buffer to clear */
-    time_sleep(0.01); 
-    
     /* Force the pin back to a standard Output mode */
     gpioSetMode(pin, PI_OUTPUT);
     
     /* Explicitly write high to be safe */
     gpioWrite(pin, 1);
+
+    /* Set frequency and duty cycle to 0 */
+    gpioHardwarePWM(pin, 0, 0); 
     
     syslog(LOG_INFO, "Hardware PWM on pin %d fully disabled.", pin);
 }
@@ -357,11 +354,11 @@ int main(int argc, char **argv) {
             current_time = get_time_s();
         }
 
-        /* Turn off PWM */
-        stop_hardware_pwm(HARD_PIN);
-
         /* leave pin state to high */
         gpioWrite(SOFT_PIN, 1);
+
+        /* Turn off PWM */
+        stop_hardware_pwm(HARD_PIN);
 
         /* Save edges timestamp */
         finalize_and_save_logs(&et, output_path);

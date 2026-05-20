@@ -71,7 +71,7 @@ argument_parse() {
     eval set -- "$PARSED_ARGS"
 
     local test_type_arg=""
-    local load_type_arg=""
+    local -a load_type_arg=()
     local load_type_all_arg=FALSE
     local led_relative_toggle_time=""
 
@@ -82,7 +82,41 @@ argument_parse() {
                 shift 2
                 ;;
             --load-type)
-                load_type_arg="$2"
+                # If user provided the flag but left it completely blank (--load-type "")
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --load-type argument cannot be empty."
+                    exit 1
+                fi
+
+                local clean_arg="$2"
+                local -a ADDR=()
+
+                # Split by comma and trim whitespace around each item
+                IFS=',' read -ra ADDR <<< "$clean_arg"
+
+                for type in "${ADDR[@]}"; do
+                    # Skip any empty elements that resulted from extra spaces
+                    [[ -z "$type" ]] && continue
+                    
+                    load_detected=FALSE
+                    # Check if present in array and save it
+                    for load in "${LOAD_TYPE_ALL_LIST[@]}"; do
+                        if [[ "$load" == "$type" ]]; then
+                            # Updsate flag and save to array
+                            load_detected=TRUE
+                            load_type_arg+=("$load")
+                            break
+                        fi
+                    done
+
+                    # Check if not found in the list
+                    if [ "$load_detected" == "FALSE" ]; then
+                        echo "ERROR: Invalid load type: $type"
+                        exit 1
+                    fi
+                done
+                echo "${load_type_arg[@]}"
+                # load_type_arg="$2"
                 shift 2
                 ;;
             --load-type-all)
@@ -131,17 +165,11 @@ argument_parse() {
     fi
 
     # --- Load type ---
-    if [[ "$load_type_all_arg" == "TRUE" ]]; then
-        LOAD_TYPE=("${LOAD_TYPE_ALL_LIST[@]}")
-    elif [[ -z "$load_type_arg" ]]; then
+    if [[ "$load_type_all_arg" == "TRUE" ]] || [[ "${#load_type_arg[@]}" == 0 ]]; then
+        # Initialize with all values
         LOAD_TYPE=("${LOAD_TYPE_ALL_LIST[@]}")
     else
-        if [[ " ${LOAD_TYPE_ALL_LIST[*]} " =~ " ${load_type_arg} " ]]; then
-            LOAD_TYPE="${load_type_arg}"
-        else
-            echo "ERROR: --load-type argument accepts only one of the following: ${LOAD_TYPE_ALL_LIST[@]}."
-            exit 1
-        fi
+        LOAD_TYPE=("${load_type_arg[@]}")
     fi
 
     LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
@@ -159,6 +187,50 @@ argument_parse() {
     echo "***************************"
 }
 
+test_start() {
+    local load_type=$1
+
+    # Test specific behavior based on requested load type
+    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
+        # Idle testing
+        echo "test_start idle"
+    elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
+        # Net load testing
+        echo "test_start load net"
+    elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
+        # USB load testing
+        echo "test_start load usb"
+    elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
+        # Net and USB load testing
+        echo "test_start load net usb"
+    else
+        echo "ERROR: Load test type request isn't known: ${load_type}"
+        exit 1
+    fi
+}
+
+test_end() {
+    local load_type=$1
+    
+    # Test specific behavior based on requested load type
+    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
+        # Idle testing
+        echo "test_end idle"
+    elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
+        # Net load testing
+        echo "test_end load net"
+    elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
+        # USB load testing
+        echo "test_end load usb"
+    elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
+        # Net and USB load testing
+        echo "test_end load net usb"
+    else
+        echo "ERROR: Load test type request isn't known: ${load_type}"
+        exit 1
+    fi
+}
+
 # Idle/load testing
 testing() {
     # Use local variable to go through all test types
@@ -169,6 +241,9 @@ testing() {
     for i in "${!_load_type[@]}"; do
         local current_load_type="${_load_type[$i]}"
         echo "-------- ${current_load_type} --------"
+
+        # Test specific start
+        test_start "${current_load_type}"
         
         echo "[Step ${i}.1/5]Starting testing script on remote RPI..."
         # Add --relative-toggle-time option if relative time toggle of the pin is required
@@ -199,6 +274,9 @@ testing() {
         # Check test state result
         sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
             "echo '$(cat .sshpass)' | sudo -S bash ${REMOTE_TEST_STATE_SCRIPT_PATH}"
+
+        # Test specific end
+        test_end "${current_load_type}"
     done
     echo "-------------------------------------"
 
@@ -215,11 +293,13 @@ testing() {
 processing() {
     # Run the python script to perform the capture.
     # It will connect to the already running Logic 2 instance.
-    python3 "$PYTHON_PROCESSING_SCRIPT" \
-        --nominal-period-us "$NOMINAL_PERIOD_US" \
-        --duration-s "$CAPTURE_DURATION_S" \
-        --input-dir "$OUTPUT_DIR" \
-        --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
+    python3 "${PYTHON_PROCESSING_SCRIPT}" \
+        --test-type "${TEST_TYPE}" \
+        --loads-type "${LOAD_TYPE[@]}" \
+        --nominal-period-us "${NOMINAL_PERIOD_US}" \
+        --duration-s "${CAPTURE_DURATION_S}" \
+        --input-dir "${OUTPUT_DIR}" \
+        --channels "${SALEAE_CH_SOFT_PIN}" "${SALEAE_CH_HARD_PIN}"
 }
 
 
@@ -275,7 +355,7 @@ main() {
     echo "***********************************************"
 
     echo "--- Test result processing ---"
-    # processing
+    processing
     echo "******************************"
 
     exit 0
