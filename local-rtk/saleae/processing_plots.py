@@ -349,3 +349,59 @@ def _plot_duty_cycle_combined(data1, data2, output_file, title=None, label=None,
         plt.close(fig) # Close the figure to free up memory
     else:
         plt.close(fig) # Close the figure to free up
+
+def _plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=False):
+    """
+    Generates and saves a stacked bar plot of interrupt distributions per CPU core.
+    """
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Create the histogram
+    # The number of bins can be adjusted. 'auto' is a good starting point.
+    if label == None:
+        label='Workload Active IRQs'
+    data.plot(kind='bar', stacked=True, ax=ax, edgecolor='black', width=0.5, alpha=0.85)
+
+    # --- Calculate Statistics for the Summary Box ---
+    total_interrupts = data.values.sum()
+    busiest_cpu = data.sum(axis=1).idxmax()
+    busiest_cpu_val = data.sum(axis=1).max()
+    
+    top_irq = data.sum(axis=0).idxmax()
+    top_irq_val = data.sum(axis=0).max()
+
+    # --- Formatting the Plot ---
+    if title == None:
+        title = "Interrupt Load Distribution per Processor Core"
+    ax.set_title(title, fontsize=16)
+    ax.set_xlabel('Processor Cores', fontsize=12)
+    ax.set_ylabel('Interrupt Count (Delta Volume)', fontsize=12)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.legend(title="Interrupt Vector", bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9)
+
+    # Force horizontal labels on the X-axis (CPU0, CPU1...) instead of angled text
+    plt.xticks(rotation=0) 
+    ax.grid(True, linestyle='--', alpha=0.5)
+
+    # Add a text box with detailed statistics
+    stats_text = (
+        f"Total Delta System IRQs: {int(total_interrupts):,}\n"
+        f"Busiest Core: {busiest_cpu} ({int(busiest_cpu_val):,} hits)\n"
+        f"Top Contributor: {top_irq}\n"
+        f"Top Contributor Volume: {int(top_irq_val):,}\n"
+        f"Unique Active IRQ Vectors: {len(data.columns)}"
+    )
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
+
+    # Save the figure to a file
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Stacked bar plot saved to '{output_file}'")
+
+    if show == True:
+        plt.show()
+        plt.close(fig) # Close the figure to free up memory
+    else:
+        plt.close(fig) # Close the figure to free up memory

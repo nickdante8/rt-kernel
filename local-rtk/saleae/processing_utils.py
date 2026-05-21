@@ -20,6 +20,7 @@ class ChannelResults:
 class ProcessedResults:
     saleae: Optional[dict[str, Any]] = field(default_factory=ChannelResults)
     cyclictest: Optional[dict[str, Any]] = None
+    interrupts: Optional[dict[str, Any]] = None
     pid: Optional[dict[str, Any]] = None
 
 # Class to store the output naming and locations
@@ -39,6 +40,8 @@ class Plot_obj:
         # Process it
         self.result.saleae = _extract_analysis_saleae(self)
         self.result.cyclictest = _extract_analysis_cyclictest(self)
+        self.result.interrupts = _extract_analysis_interrupts(self)
+
 
 # ---- Private Functions ----
 # -------------------
@@ -128,6 +131,80 @@ def _extract_analysis_cyclictest(plot_obj: Plot_obj):
         'peak_to_peak': (thread_data['max'] - thread_data['min']) if len(latencies) > 0 else 0,
     }
 
+def _extract_analysis_interrupts(plot_obj: Plot_obj):
+    def parse_snapshot(file_path):
+        """
+        arses /proc/interrupts into a dictionary mapping IRQ/Type to counts across CPUs.
+        """
+        irq_dict = {}
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Snapshot file not found: {file_path}")
+        
+        with open(file_path, 'r') as f:
+            # First line contains CPU headers (e.g., CPU0, CPU1...)
+            cpu_headers = f.readline().strip().split()
+            num_cpus = len(cpu_headers)
+            
+            for line in f:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                
+                # Split line into maximum components based on column count
+                parts = re.split(r'\s+', line_str, maxsplit=num_cpus + 1)
+                if len(parts) < num_cpus + 1:
+                    continue
+                    
+                irq_id = parts[0].rstrip(':')
+                try:
+                    # Dynamically collect counts across all available CPU cores
+                    cpu_counts = [int(parts[i]) for i in range(1, num_cpus + 1)]
+                    cpu_total = sum(cpu_counts)
+                    
+                    # Extract descriptive name (e.g., local timer interrupts 'LOC', 'eth0', or 'GPIO')
+                    description_raw = parts[-1] if len(parts) > num_cpus + 1 else "Unknown"
+                    description_split = re.split(r'\s+', description_raw, maxsplit=num_cpus + 1)
+                    description = description_split[-1] if len(description_split) >= num_cpus else description_raw
+
+                    irq_dict[irq_id] = {'cpu': np.array(cpu_counts),
+                                        'cpu_total': cpu_total,
+                                        'desc': description
+                                        }
+                except ValueError:
+                    # Skip non-numeric initialization metadata rows
+                    continue
+        return irq_dict, num_cpus
+    
+    """
+    Calculates absolute delta counts of interrupts handled during the run.
+    """
+    start_snap, num_cpus = parse_snapshot(os.path.join(plot_obj.input_dir, plot_obj.load_type, "interrupts_start.txt"))
+    end_snap, _ = parse_snapshot(os.path.join(plot_obj.input_dir, plot_obj.load_type, "interrupts_end.txt"))
+    
+    delta_records = []
+    delta_cpus_total = np.zeros(num_cpus)
+    for irq, end_data in end_snap.items():
+        # Safeguard in case an interrupt type wasn't present in the start snapshot
+        start_data = start_snap.get(irq, {'cpu': np.zeros(num_cpus), 'cpu_total': 0})
+        
+        # Fixed: Real matrix subtraction (End - Start)
+        delta_cpus = end_data['cpu'] - start_data['cpu']
+        delta_total = end_data['cpu_total'] - start_data['cpu_total']
+        delta_cpus_total = delta_cpus_total + delta_cpus
+        
+        # Only keep records where interrupts actually fired to keep the data clean
+        if delta_total >= 0:
+            delta_records.append({
+                'irq': irq,
+                'delta_cpu': delta_cpus.tolist(),  # Convert to list for clean DataFrame rendering
+                'delta_total': delta_total,
+                'description': end_data['desc']
+            })
+    
+    # Total counts per CPU
+    delta_records.append({'delta_cpus_total': delta_cpus_total.tolist()})
+
+    return delta_records
 
 # ---- Public Functions ----
 # -------------------
@@ -352,4 +429,25 @@ def plot_duty_cycle_combined(obj1: Plot_obj, obj2: Plot_obj, channel, show=False
     proc_plt._plot_duty_cycle_combined(obj1.result.saleae.channels[channel],
                                        obj2.result.saleae.channels[channel], 
                                        plot_path(obj1, "duty_cycle", f"{obj2.load_type}_{channel}",combined=True),
-                                       title, label, show=True, y_lim=y_lim)
+                                       title, label, show=show, y_lim=y_lim)
+
+def plot_interrupts_stacked_bar(obj: Plot_obj, show=False):
+    # Filter out interrupts with 0 activity to keep the plot clean
+    active_interrupts = [
+        item for item in obj.result.interrupts
+        if item.get('delta_total', 0) > 0
+    ]
+
+    # Determine number of CPUs dynamically from the remaining data
+    if active_interrupts:
+        num_cpus = len(active_interrupts[0]['delta_cpu'])
+        cpu_indices = [f"CPU{i}" for i in range(num_cpus)]
+
+        # Restructure data: { 'irq': [CPU0_val, CPU1_val, ...] }
+        plot_dict = {f"{item['irq']} ({item['description']})": item['delta_cpu'] for item in active_interrupts}
+        df_matrix = pd.DataFrame(plot_dict, index=cpu_indices)
+
+        # /proc/interrupts bar chart
+        proc_plt._plot_interrupts_stacked_bar(df_matrix,
+                                              plot_path(obj, "bar", "proc_interrupts"),
+                                              None, None, show=show)
