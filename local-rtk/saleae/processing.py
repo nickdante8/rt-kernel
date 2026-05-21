@@ -66,6 +66,10 @@ def main():
         for channel in args.channels:
             plots.append(proc.Plot_obj(args.input_dir, args.test_type, load_type, channel, args.nominal_period_us, args.duration_s))
 
+    # Load and process data
+    for plot in plots:
+        plot.load_and_process_datas()
+
     # --- Data Analysis ---
     # Separate to idle and load
     plots_idle = [obj for obj in plots if obj.load_type == "idle"]

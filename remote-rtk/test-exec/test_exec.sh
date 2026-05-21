@@ -73,8 +73,12 @@ current_configuration() {
 
 # CPU, commands and interrupts measurement
 timing_measurement() {
+    local measure_state="$1"
+    local cyclictest_interval="$2"
+    local cyclictest_hist="$3"
+
     # Background Logging
-    if [[ "$1" == "start" ]]; then
+    if [[ "${measure_state}" == "start" ]]; then
         # Local variables to detect led-toggle start and record its pid
         local led_pid=""
         local timeout=1
@@ -116,8 +120,15 @@ timing_measurement() {
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_start.txt"
 
         # Start cyclictest (Internal Latency)
-        cyclictest -m -a 0 -N -t1 -p99 i400 -D ${CAPTURE_DURATION_S} --json="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest_interval.json" -h 5000 --histfile="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest_hist.log" &
+        sudo cyclictest -m -a 0 -s -t1 -p99 -i${cyclictest_interval} -h${cyclictest_hist} -D ${CAPTURE_DURATION_S} --json="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.json" --histfile="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.log" &
         CYCLIC_PID=$!
+
+        # Save pid state for future logging
+        chrt -p ${PID_STAT_PID} > "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${MPSTAT_CPUNET_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${MPSTAT_INT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${VMSTAT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${CYCLIC_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
     else
         # Cleanup and Finalize
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_end.txt"
@@ -145,27 +156,36 @@ main() {
 $(date +%Y-%m-%d-%H:%M:%S.%N)
 EOF
 
+    # Variable calculations
+    local cyclictest_interval=$(($NOMINAL_PERIOD_US / 2))
+    # TODO: Update it for all load types
+    local cyclictest_hist=90
+
     # Create a directory for the test results
     echo "Results will be saved in: ${OUTPUT_DIR}/${LOAD_TYPE}"
     # Test specific behavior based on requested load type
     if [[ "${LOAD_TYPE}" == "${LOAD_TYPE_IDLE}" ]]; then
         # Idle testing
-        echo "idle"
+        cyclictest_hist=100
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${LOAD_TYPE}" == "${LOAD_TYPE_NET}" ]]; then
         # Net load testing
-        echo "load net"
+        cyclictest_hist=110
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${LOAD_TYPE}" == "${LOAD_TYPE_USB}" ]]; then
         # USB load testing
         echo "load usb"
+        cyclictest_hist=110
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${LOAD_TYPE}" == "${LOAD_TYPE_NET_USB}" ]]; then
         # Net and USB load testing
         echo "load net usb"
+        cyclictest_hist=110
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     else
         echo "ERROR: Load test type request isn't known: ${LOAD_TYPE}"
         exit 1
     fi
-
-    timing_measurement "start"
 
     # Temporary
     sleep $((CAPTURE_DURATION_S + 2))

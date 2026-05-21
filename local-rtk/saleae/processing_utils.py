@@ -1,271 +1,132 @@
 import pandas as pd
+import json
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import re
 import os
+from dataclasses import dataclass, field
+from typing import Any, Optional, Dict, List
+import processing_plots as proc_plt
+
+@dataclass
+class ChannelResults:
+    # Use a dictionary to hold an arbitrary number of channels.
+    # Key could be the channel index (int) or name (str).
+    channels: Dict[str, Any] = field(default_factory=dict)
+    common: Optional[Dict[str, Any]] = None
+
+@dataclass
+class ProcessedResults:
+    saleae: Optional[dict[str, Any]] = field(default_factory=ChannelResults)
+    cyclictest: Optional[dict[str, Any]] = None
+    pid: Optional[dict[str, Any]] = None
 
 # Class to store the output naming and locations
 class Plot_obj:
     def __init__(self, input_dir, test_type, load_type, channel, nominal_period_us, duration_s):
         self.input_dir = input_dir
-        self.csv_path = os.path.join(input_dir, load_type, "digital.csv")
         self.test_type = test_type
         self.load_type = load_type
-        self.channel = channel
+        self.channels = channel
         self.duration_s = duration_s
         self.nominal_period_us = nominal_period_us
-        self.jitter_title = "Jitter Distribution (" + test_type + " under " + load_type + ", Channel " + str(channel) + ")"
 
-        # Load the data
-        df, columns = load_csv_data(self.csv_path)
-
+        # result class
+        self.result = ProcessedResults()
+    
+    def load_and_process_datas(self):
         # Process it
-        self.result = _extract_analysis(self, df, columns)
-
+        self.result.saleae = _extract_analysis_saleae(self)
+        self.result.cyclictest = _extract_analysis_cyclictest(self)
 
 # ---- Private Functions ----
 # -------------------
-def _extract_analysis(self, df, columns):
-    # Regex patern to match column name
-    pattern = rf"Channel\s*{self.channel}\b"
+def _extract_analysis_saleae(plot_obj: Plot_obj) -> ChannelResults:
+    # Create the result object
+    out = ChannelResults()
 
-    # Search by the pattern
-    matched_idx, matched_col = next(
-        ((i, col) for i, col in enumerate(columns) if re.search(pattern, col, re.IGNORECASE)),
-        (None, None)
-    )
+    # File path
+    csv_path = os.path.join(plot_obj.input_dir, plot_obj.load_type, "digital.csv")
 
-    # Check if a column was found
-    if matched_idx is not None:
-        print(f"Successfully matched graph channel {self.channel} to column '{matched_col}'")
-        result = perform_timing_analysis(self, df, columns[0], matched_col)
+    # Load the data
+    df, columns = load_csv_data(csv_path)
+
+    # Fill the data
+    for ch in plot_obj.channels:
+        # Regex patern to match column name
+        pattern = rf"Channel\s*{ch}\b"
+
+        # Search by the pattern
+        matched_idx, matched_col = next(
+            ((i, col) for i, col in enumerate(columns) if re.search(pattern, col, re.IGNORECASE)),
+            (None, None)
+        )
+
+        # Check if a column was found
+        if matched_idx is not None:
+            print(f"Successfully matched graph channel {ch} to column '{matched_col}'")
+            out.channels[ch] = perform_timing_analysis(plot_obj, df, columns[0], matched_col)
+        else:
+            print(f"Warning: No column found matching pattern '{pattern}'")
+            out.channels[ch] = None
+
+    out.common = perform_phase_shift_analysis(out.channels[0]['edges_rise'], out.channels[1]['edges_rise'], plot_obj.nominal_period_us)
+
+    return out
+
+def _extract_analysis_cyclictest(plot_obj: Plot_obj):
+    # File path
+    cyclictest_path = os.path.join(plot_obj.input_dir, plot_obj.load_type, "cyclictest.json")
+
+    # Extract data
+    try:
+        with open(cyclictest_path, 'r') as file:
+            data = json.load(file)
+    except FileNotFoundError:
+        print(f"Error: The file '{cyclictest_path}' was not found.")
+        return None
+    
+    # Extract thread 0 statistics
+    thread_data = data['thread']['0']
+    hist_data = thread_data['histogram']
+    
+    # Convert histogram to latency
+    latencies = [int(k) for k in hist_data.keys()]
+    frequencies = list(hist_data.values())
+
+    # Calculate weighted standard deviation
+    avg_lat = thread_data['avg']
+    total_cycles = thread_data['cycles']
+    
+    if total_cycles > 0 and len(latencies) > 0:
+        # Sum up the squared deviations weighted by their frequencies
+        variance_sum = sum(
+            freq * ((int(lat_str) - avg_lat) ** 2) 
+            for lat_str, freq in hist_data.items()
+        )
+        std_dev = math.sqrt(variance_sum / total_cycles)
     else:
-        print(f"Warning: No column found matching pattern '{pattern}'")
-        result = None
+        std_dev = 0.0
 
-    return result
-
-def _plot_histogram_rise(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax.hist(stats['jitter_rise'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Rise)')
-
-    # Add a vertical line for the mean
-    ax.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_rise_us']:.2f} µs")
-
-    # --- Formatting the Plot ---
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax.set_ylabel('Probability Density', fontsize=12)
-    ax.grid(True)
-    ax.legend()
-
-    # Add a text box with detailed statistics
-    stats_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev: {stats['std_dev_rise_us']:.2f} µs\n"
-        f"Min Jitter: {stats['min_jitter_rise_us']:.2f} µs\n"
-        f"Max Jitter (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
-        f"Peak-to-Peak: {stats['peak_to_peak_jitter_rise_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
+    return {
+        # Extract start/end dates
+        't0': data['start_time'],
+        't1': data['end_time'],
         
-def _plot_histogram_fall(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
+        # histogram and latency
+        'histogram': hist_data,
+        'latencies': latencies,
+        'frequencies': frequencies,
 
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax.hist(stats['jitter_fall'], bins='auto', density=True, alpha=0.75, label='Jitter Distribution (Fall)')
-
-    # Add a vertical line for the mean
-    ax.axvline(stats['mean_jitter_fall_us'], color='r', linestyle='--', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-
-    # --- Formatting the Plot ---
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax.set_ylabel('Probability Density', fontsize=12)
-    ax.grid(True)
-    ax.legend()
-
-    # Add a text box with detailed statistics
-    stats_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev: {stats['std_dev_fall_us']:.2f} µs\n"
-        f"Min Jitter: {stats['min_jitter_fall_us']:.2f} µs\n"
-        f"Max Jitter (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
-        f"Peak-to-Peak: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
-
-def _plot_histogram_combined(stats, title, output_file, show=False):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(12, 7))
-    ax2 = ax1.twinx()
-
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax1.hist(stats['jitter_rise'], bins='auto', density=True, color='r', alpha=0.75, label='Jitter Distribution Rise')
-    ax2.hist(stats['jitter_fall'], bins='auto', density=True, color='b', alpha=0.45, label='Jitter Distribution Fall')
-
-    # Add a vertical line for the mean
-    ax1.axvline(stats['mean_jitter_rise_us'], color='r', linestyle='dashed', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-    ax2.axvline(stats['mean_jitter_fall_us'], color='b', linestyle='dotted', linewidth=2, label=f"Mean: {stats['mean_jitter_fall_us']:.2f} µs")
-
-    # --- Formatting the Plot ---
-    ax1.set_title(title, fontsize=16)
-    ax1.set_xlabel(f'Jitter (µs) from Nominal Period ({stats['nominal_period_us']} µs)', fontsize=12)
-    ax1.set_ylabel('Probability Density', fontsize=12)
-    ax1.grid(True)
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2)
-
-    # Add a text box with detailed statistics
-    stats_rise_fall_text = (
-        f"Samples: {stats['sample_count']}\n"
-        f"Std Dev Rise: {stats['std_dev_rise_us']:.2f} µs\n"
-        f"Std Dev Fall: {stats['std_dev_fall_us']:.2f} µs\n"
-        f"Min Jitter Rise: {stats['min_jitter_rise_us']:.2f} µs\n"
-        f"Min Jitter Fall: {stats['min_jitter_fall_us']:.2f} µs\n"
-        f"Max Jitter Rise (WCET): {stats['max_jitter_rise_us']:.2f} µs\n"
-        f"Max Jitter Fall (WCET): {stats['max_jitter_fall_us']:.2f} µs\n"
-        f"Peak-to-Peak Rise: {stats['peak_to_peak_jitter_rise_us']:.2f} µs\n"
-        f"Peak-to-Peak Fall: {stats['peak_to_peak_jitter_fall_us']:.2f} µs"
-    )
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax1.text(0.02, 0.97, stats_rise_fall_text, transform=ax1.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
-
-def _plot_phase_shift_combined(phase, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-    
-    # for phase in phase_idle.values():
-    ax1.plot(phase['time_axis'], phase['latency'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(phase['time_axis'], phase['phase'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Latency [us]', color='blue')
-    ax2.set_ylabel('Phase Difference [Degrees]', color='red')
-    plt.title('Latency and Phase Alignment Over Time')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
-
-def _plot_signal_drift(plot, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-    
-    # for phase in phase_idle.values():
-    ax1.plot(plot['time_jitter_rise'], plot['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(plot['time_jitter_fall'], plot['drifts_fall'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Accumulated Error [us]', color='blue')
-    ax2.set_ylabel('Accumulated Error [us]', color='red')
-    plt.title('Cumulative Signal Drift (Relative to nominal period of ' + str(plot['nominal_period_us']) + ' µs)')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
-
-def _plot_signal_drift_combined(plot_1, plot_2, label, output_file, show=False):
-    plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    ax2 = ax1.twinx()
-
-    # for phase in phase_idle.values():
-    ax1.plot(plot_1['time_jitter_rise'], plot_1['drifts_rise'], alpha=0.4, color='blue', label=f"{label[0]}")
-    ax2.plot(plot_2['time_jitter_rise'], plot_2['drifts_rise'], alpha=0.2, color='red', label=f"{label[1]}")
-
-    # --- Formatting the Plot ---
-    ax1.set_xlabel('Time [s]')
-    ax1.set_ylabel('Accumulated Error [us]', color='blue')
-    ax2.set_ylabel('Accumulated Error [us]', color='red')
-    plt.title('Combined cumulative Signal Drift (Relative to nominal period of ' + str(plot_1['nominal_period_us']) + ' µs)')
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up memory
+        # Summary metrics
+        'cycles': total_cycles,
+        'min': thread_data['min'],
+        'max': thread_data['max'],
+        'avg': avg_lat,
+        'std_dev': std_dev,
+        'peak_to_peak': (thread_data['max'] - thread_data['min']) if len(latencies) > 0 else 0,
+    }
 
 
 # ---- Public Functions ----
@@ -292,7 +153,7 @@ def load_csv_data(csv_path):
 
     return df, columns
 
-def perform_timing_analysis(obj, df, time_col, channel_col):
+def perform_timing_analysis(obj: Plot_obj, df, time_col, channel_col):
     """
     Calculates Jitter, Drift, Latency, and Phase based on a nominal period.
     """
@@ -415,95 +276,80 @@ def perform_phase_shift_analysis(edges0, edges1, nominal_period_us):
         'time_axis': edges0[:min_len]
     }
 
-def plot_path(plot, type, name, combined=False):
+def plot_path(obj: Plot_obj, type, name, combined=False):
+    # Check how to combine it
     if combined == False:
         if name == None or name == "":
-            combined_path = "jitter_" + type + "_" + plot.test_type + "_" + plot.load_type + "_" + str(plot.channel) + ".png"
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + ".png"
         else:
-            combined_path = "jitter_" + type + "_" + plot.test_type + "_" + plot.load_type + "_" + name + "_" + str(plot.channel) + ".png"
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + name + ".png"
     else:
         if name == None or name == "":
-            combined_path = "jitter_" + type + "_" + plot.test_type + "_" + plot.load_type + ".png"
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + ".png"
         else:
-            combined_path = "jitter_" + type + "_" + plot.test_type + "_" + plot.load_type + "_" + name + ".png"
-    combined_path = os.path.join(plot.input_dir, combined_path)
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + name + ".png"
+    
+    # Combined result
+    combined_path = os.path.join(obj.input_dir, combined_path)
+    
     return combined_path
 
-def plot_histograms(plots, show=False):
+def plot_histograms(obj: Plot_obj, show=False):
     # Plot all histogram types
-    for plot in plots:
-        _plot_histogram_rise(plot.result, plot.jitter_title,
-                             plot_path(plot, "histogram", "rise"),
-                             show=show)
-        _plot_histogram_fall(plot.result, plot.jitter_title,
-                             plot_path(plot, "histogram", "fall"),
-                             show=show)
-        _plot_histogram_combined(plot.result, plot.jitter_title,
-                                 plot_path(plot, "histogram", "rise_fall"),
-                                 show=show)
+    for i in range(len(obj.channels)):
+        title = "Jitter Distribution (" + obj.test_type + " under " + obj.load_type + ", Channel " + str(obj.channels[i]) + ")"
+        proc_plt._plot_histogram_rise(obj.result.saleae.channels[i],
+                                      plot_path(obj, "histogram", "rise"),
+                                      title, None, show=show)
+        proc_plt._plot_histogram_fall(obj.result.saleae.channels[i],
+                                      plot_path(obj, "histogram", "fall"),
+                                      title, None, show=show)
+        proc_plt._plot_histogram_combined(obj.result.saleae.channels[i],
+                                          plot_path(obj, "histogram", "rise_fall"),
+                                          title, None, show=show)
+        
+    # Cyclictest histogram
+    title = "Jitter Distribution CyclicTest (" + obj.test_type + " under " + obj.load_type + ")"
+    proc_plt._plot_histogram_cyclic_test(obj.result.cyclictest, 
+                                         plot_path(obj, "histogram", "cyclic_test"),
+                                         title, None, show=show)
 
-def plot_phase_shift_combined(phase, plots, show=False):
-    label = [
-        f"Latency Channel {plots[0].channel} in comparison\nwith Channel {plots[1].channel} ({plots[1].load_type})",
-        f"Phase Difference Channel {plots[0].channel} in\ncomparison with Channel {plots[1].channel} ({plots[1].load_type})",
-    ]
-    _plot_phase_shift_combined(phase, label,
-                               plot_path(plots[0], "phase_shift", "", combined=True),
-                               show=show)
+def plot_phase_shift_combined(obj: Plot_obj, show=False):
+    title = "Latency and Phase alignment over time (" + obj.test_type + ", under " + obj.load_type + " for both channels)"
+    proc_plt._plot_phase_shift_combined(obj.result.saleae.common,
+                               plot_path(obj, "phase_shift", "", combined=True),
+                               title, None, show=show)
 
-def plot_signal_drift(plots, show=False):
-    for plot in plots:
+def plot_signal_drift(obj: Plot_obj, show=False):
+    for i in range(len(obj.channels)):
         # Individual
+        title = "Cumulative Signal Drift (Relative to nominal period of " + str(obj.nominal_period_us) + " µs)"
         label = [
-            f"Channel {plot.channel} rise ({plot.load_type})",
-            f"Channel {plot.channel} fall ({plot.load_type})",
+            f"Channel {obj.channels[i]} rise ({obj.load_type})",
+            f"Channel {obj.channels[i]} fall ({obj.load_type})",
         ]
-        _plot_signal_drift(plot.result, label,
-                           plot_path(plot, "signal_drift", "rise_fall"),
-                           show=show)
+        proc_plt._plot_signal_drift(obj.result.saleae.channels[i],
+                                    plot_path(obj, "signal_drift", f"rise_fall_{obj.channels[i]}"),
+                                    title, label, show=show)
 
-def plot_signal_drift_combined(plot1, plot2, show=False):
+def plot_signal_drift_combined(obj: Plot_obj, show=False):
+    title = f'Combined cumulative Signal Drift (Relative to nominal period of ' + str(obj.nominal_period_us) + ' µs)'
     label = [
-        f"Channel {plot1.channel} ({plot1.load_type})",
-        f"Channel {plot2.channel} ({plot2.load_type})",
+        f"Channel {obj.channels[0]} ({obj.load_type})",
+        f"Channel {obj.channels[1]} ({obj.load_type})",
     ]
-    _plot_signal_drift_combined(plot1.result, plot2.result, label, 
-                                plot_path(plot1, "signal_drift", f"{plot1.channel}_{plot2.channel}", combined=True),
-                                show=show)
+    proc_plt._plot_signal_drift_combined(obj.result.saleae.channels[0],
+                                         obj.result.saleae.channels[1],
+                                         plot_path(obj, "signal_drift", f"{obj.channels[0]}_{obj.channels[1]}", combined=True),
+                                         title, label, show=show)
 
-def plot_duty_cycle_combined(stats_idle, stats_load, title, output_file, show=False, y_lim=None):
-    """
-    Generates and saves a histogram of the jitter data.
-    """
-    plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    # Create the plot
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    ax.plot(stats_idle['time_pulse'], stats_idle['duty_cycles'], marker='.', linestyle='dashed', color='r', alpha=0.75, label='Duty Cycle Idle')
-    ax.plot(stats_load['time_pulse'], stats_load['duty_cycles'], marker='.', linestyle='dotted', color='b', alpha=0.45, label='Duty Cycle Load')
-
-    # Add a vertical line for the mean
-    ax.axhline(50, color='black', linestyle='dashed', linewidth=1, alpha=0.3, label=f"Target (50%)")
-
-    # --- Formatting the Plot ---
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel('Time [s]', fontsize=12)
-    ax.set_ylabel('Duryt Cycle (%)', fontsize=12)
-    ax.grid(True)
-    ax.legend(loc='best')
-
-    # --- SET Y AXIS RANGE ---
-    # ax.set_ylim(50)
-    # Change this in your plotting function to see the tiny fluctuations
-    ax.set_ylim(y_lim)
-
-    # Save the figure to a file
-    plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
-
-    if show == True:
-        plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up
+def plot_duty_cycle_combined(obj1: Plot_obj, obj2: Plot_obj, channel, show=False, y_lim=None):
+    title = f"Duty Cycle comparison of channel {obj1.channels[channel]}"
+    label = [
+        f"{obj1.load_type}",
+        f"{obj2.load_type}"
+    ]
+    proc_plt._plot_duty_cycle_combined(obj1.result.saleae.channels[channel],
+                                       obj2.result.saleae.channels[channel], 
+                                       plot_path(obj1, "duty_cycle", f"{obj2.load_type}_{channel}",combined=True),
+                                       title, label, show=True, y_lim=y_lim)
