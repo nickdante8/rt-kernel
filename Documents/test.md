@@ -34,17 +34,25 @@ gantt
     %% ry_mtx - remote margine time
     %% ly_mtx - local margine time
     section remote
+        %% Test execution script
         TE1 :rte1, 00-00-000, 10s
         MT  :rte_mt1, after rte1, 1s
         MT  :rte_mt2, after rte_mt1, 1s
+        %% Commands running in test execution script
+        CTE1:rcte1, 00-00-200, 10s
+        MT  :rcte_mt1, after rcte1, 1s
+        MT  :rcte_mt2, after rcte_mt1, 0.5s
+        %% PIN toggle service
         MT  :rlt_mt1, 00-00-100, 1s
         LT1 :rlt1, after rlt_mt1, 10s
     section local
         M1  :lm1, 00-00-500, 10s
-        M1_MT1  :lm_mt1, after lm1, 1s
-        M1_MT2  :after lm_mt1, 1s
-    Analysis start   : vert, v1, after rlt_mt1, 1s
-    Analysis end     : vert, v2, after rlt1, 1s
+        MT  :lm_mt1, after lm1, 1s
+        MT  :lm_mt2, after lm_mt1, 1s
+    S1    : vert, vs1, 00-00-500, 1s
+    S2    : vert, vs2, after lm_mt2, 1s
+    A1  : vert, v1, after rlt_mt1, 1s
+    A2    : vert, v2, after rlt1, 1s
 ```
 
 | Setup | Jitter (Cycle-to-Cycle variation) | Drift (Long-term phase shift) | Why? |
