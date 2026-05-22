@@ -371,6 +371,28 @@ def _plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show
     top_irq = data.sum(axis=0).idxmax()
     top_irq_val = data.sum(axis=0).max()
 
+    # --- Add IRQ Name and Number Directly On The Bars ---
+    # Loop through each stacked layer (container)
+    for container in ax.containers:
+        # Retrieve the layer identifier (e.g., "IRQ 51 (dwc_otg_sim-fiq)")
+        irq_layer_label = container.get_label()
+        
+        labels = []
+        for val in container.datavalues:
+            # Smart threshold: Only paint the text if the segment represents > 3% of the busiest core's height
+            # This prevents labels from overlapping and clumping on near-zero bars
+            if val >= (busiest_cpu_val * 0.03):
+                # Format text to show the shortened IRQ string identity and its delta count
+                labels.append(f"irq {irq_layer_label.split(' ')[0]}\n({int(val):,})")
+            elif val > (busiest_cpu_val * 0.01):
+                # Format text to show the shortened IRQ string identity and its delta count
+                labels.append(f"({int(val):,})")
+            else:
+                labels.append("") # Hide text for tiny segments
+                
+        # Draw the labels directly in the center of each bar block
+        ax.bar_label(container, labels=labels, label_type='center', fontsize=8, color='black')
+
     # --- Formatting the Plot ---
     if title == None:
         title = "Interrupt Load Distribution per Processor Core"
@@ -393,7 +415,7 @@ def _plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show
         f"Unique Active IRQ Vectors: {len(data.columns)}"
     )
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
+    ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', bbox=props)
 
     # Save the figure to a file

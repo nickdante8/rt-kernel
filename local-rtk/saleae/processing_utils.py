@@ -376,13 +376,13 @@ def plot_histograms(obj: Plot_obj, show=False):
     for i in range(len(obj.channels)):
         title = "Jitter Distribution (" + obj.test_type + " under " + obj.load_type + ", Channel " + str(obj.channels[i]) + ")"
         proc_plt._plot_histogram_rise(obj.result.saleae.channels[i],
-                                      plot_path(obj, "histogram", "rise"),
+                                      plot_path(obj, "histogram", f"rise_{obj.channels[i]}"),
                                       title, None, show=show)
         proc_plt._plot_histogram_fall(obj.result.saleae.channels[i],
-                                      plot_path(obj, "histogram", "fall"),
+                                      plot_path(obj, "histogram", f"fall_{obj.channels[i]}"),
                                       title, None, show=show)
         proc_plt._plot_histogram_combined(obj.result.saleae.channels[i],
-                                          plot_path(obj, "histogram", "rise_fall"),
+                                          plot_path(obj, "histogram", f"rise_fall_{obj.channels[i]}"),
                                           title, None, show=show)
         
     # Cyclictest histogram
@@ -447,7 +447,8 @@ def plot_interrupts_stacked_bar(obj: Plot_obj, show=False):
         plot_dict = {f"{item['irq']} ({item['description']})": item['delta_cpu'] for item in active_interrupts}
         df_matrix = pd.DataFrame(plot_dict, index=cpu_indices)
 
+        title = f"Interrupt Load Distribution per Processor Core ({obj.load_type})"
         # /proc/interrupts bar chart
         proc_plt._plot_interrupts_stacked_bar(df_matrix,
                                               plot_path(obj, "bar", "proc_interrupts"),
-                                              None, None, show=show)
+                                              title, None, show=show)
