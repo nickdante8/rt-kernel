@@ -129,7 +129,7 @@ argument_parse() {
                 ;;
             --duration-s)
                 CAPTURE_DURATION_S="$2"
-                SALEAE_CAPTURE_DURATION_S=$(($2 + 2))
+                CAPTURE_DURATION_EXTENDED_S=$(($2 + 2))
                 shift 2
                 ;;
             --relative-toggle-time)
@@ -173,6 +173,8 @@ argument_parse() {
     fi
 
     LED_TOGGLE_OPTIONAL_PARAMS="${led_relative_toggle_time}"
+    # Gets the first local IP address
+    LOCAL_IP=$(hostname -I | awk '{print $1}')
 
     # --- Display Current Configuration ---
     echo "---- Current Configuration ----"
@@ -183,26 +185,32 @@ argument_parse() {
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
     echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
+    echo "LOCAL_IP: ${LOCAL_IP}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
     echo "***************************"
 }
 
 test_start() {
-    local load_type=$1
+    local load_type="$1"
+
+    # Create output folder
+    mkdir -p "${OUTPUT_DIR}/${load_type}"
 
     # Test specific behavior based on requested load type
     if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
-        # Idle testing
-        echo "test_start idle"
+        # Idle
+        echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
-        # Net load testing
-        echo "test_start load net"
+        # Net load
+        iperf3 -s --verbose --json --logfile "${OUTPUT_DIR}/${load_type}/network_results.json" &
+        IPERF3_PID=$!
     elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
-        # USB load testing
-        echo "test_start load usb"
+        # USB load
+        echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
-        # Net and USB load testing
-        echo "test_start load net usb"
+        # Net and USB load
+        iperf3 -s --verbose --json --logfile "${OUTPUT_DIR}/${load_type}/network_results.json" &
+        IPERF3_PID=$!
     else
         echo "ERROR: Load test type request isn't known: ${load_type}"
         exit 1
@@ -210,21 +218,21 @@ test_start() {
 }
 
 test_end() {
-    local load_type=$1
+    local load_type="$1"
     
     # Test specific behavior based on requested load type
     if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
-        # Idle testing
-        echo "test_end idle"
+        # Idle
+        echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
-        # Net load testing
-        echo "test_end load net"
+        # Net load
+        sudo kill -SIGKILL $IPERF3_PID || true
     elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
-        # USB load testing
-        echo "test_end load usb"
+        # USB load
+        echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
-        # Net and USB load testing
-        echo "test_end load net usb"
+        # Net and USB load
+        sudo kill -SIGKILL $IPERF3_PID || true
     else
         echo "ERROR: Load test type request isn't known: ${load_type}"
         exit 1
@@ -234,7 +242,7 @@ test_end() {
 # Idle/load testing
 testing() {
     # Use local variable to go through all test types
-    local -n _load_type=$1
+    local -n _load_type="$1"
 
     echo "----------- Testing -----------"
     # Parse throught them
@@ -255,17 +263,18 @@ testing() {
             --date-init '${DATE}' \
             --duration-s '${CAPTURE_DURATION_S}' \
             --nominal-period-us '${NOMINAL_PERIOD_US}' \
-            ${LED_TOGGLE_OPTIONAL_PARAMS}"
+            ${LED_TOGGLE_OPTIONAL_PARAMS} \
+            --ip-addr '${LOCAL_IP}'"
         
         # Run the python script to perform the capture.
         # It will connect to the already running Logic 2 instance.
         echo "[Step ${i}.2/5]Starting capture with Python script..."
-        python3 "$PYTHON_MEASUREMENT_SCRIPT" \
-            --port "$SALEAE_AUTOMATION_PORT" \
-            --device "$SALEAE_DEVICE_ID" \
-            --duration-s "$SALEAE_CAPTURE_DURATION_S" \
-            --output-dir "$OUTPUT_DIR/$current_load_type" \
-            --channels "$SALEAE_CH_SOFT_PIN" "$SALEAE_CH_HARD_PIN"
+        python3 "${PYTHON_MEASUREMENT_SCRIPT}" \
+            --port "${SALEAE_AUTOMATION_PORT}" \
+            --device "${SALEAE_DEVICE_ID}" \
+            --duration-s "${CAPTURE_DURATION_EXTENDED_S}" \
+            --output-dir "${OUTPUT_DIR}/${current_load_type}" \
+            --channels "${SALEAE_CH_SOFT_PIN}" "${SALEAE_CH_HARD_PIN}"
 
         # Add a small sleep to prevent spike during the test
         # After this, ideally, the tests on the remote must be finished

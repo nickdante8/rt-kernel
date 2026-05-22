@@ -13,9 +13,9 @@ cd "$SCRIPT_DIR"
 
 # Required dependencies
 # install pakages true name
-INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3")
+INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio")
 # command name to check if they are available
-REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3")
+REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio")
 
 
 # ==============================================================================
@@ -171,14 +171,17 @@ Conflicts=pigpiod.service
 # This forces the kernel to prioritize this task over the network stack
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=99
+
 # Adjust the path to where binary is actually located
 ExecStartPre=/bin/sleep ${LED_SERVICE_DELAY_START_TIME}
 EnvironmentFile=${LED_SERVICE_ENV_FILE_PATH}
 ExecStart=${LED_TOGGLE_EXE_PATH} -p \${NOMINAL_PERIOD_US} -d \${CAPTURE_DURATION_S} -o \${OUTPUT_DIR}/\${LOAD_TYPE} \$LED_TOGGLE_OPTIONAL_PARAMS
 WorkingDirectory=${LED_TOGGLE_WORKING_DIRECTORY}
+
 # Handling logs
-StandardOutput=append:/var/log/${LED_PROJECT_NAME}.log
+StandardOutput=journal
 StandardError=inherit
+
 # Shutdown behaviour
 KillSignal=SIGTERM
 TimeoutStopSec=10s
@@ -225,16 +228,20 @@ Description=Raspberry Pi Test execution Service
 After=network.target
 
 [Service]
+# Real-Time Scheduling Configuration
 # This forces the kernel to prioritize this task over the network stack
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=99
+
 # Adjust the path to where binary is actually located
 ExecStartPre=/bin/sleep ${TEST_EXEC_SERVICE_DELAY_START_TIME}
 ExecStart=${TEST_EXEC_EXE_PATH}
 WorkingDirectory=${TEST_EXEC_WORKING_DIRECTORY}
+
 # Handling logs
-StandardOutput=append:/var/log/${TEST_EXEC_PROJECT_NAME}.log
+StandardOutput=journal
 StandardError=inherit
+
 # Shutdown behaviour
 KillSignal=SIGTERM
 TimeoutStopSec=10s

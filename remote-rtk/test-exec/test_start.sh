@@ -58,7 +58,7 @@ argument_parse() {
     # Use getopt for robust argument parsing. The empty string '' after -o means no short options.
     # The long options are defined after --long.
     # The -- "$@" ensures that getopt correctly handles arguments that might start with a hyphen.
-    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us:,relative-toggle-time -- "$@")
+    PARSED_ARGS=$(getopt -o '' --long setup,test-type:,load-type:,date-init:,duration-s:,nominal-period-us:,relative-toggle-time,ip-addr: -- "$@")
 
     # Check for parsing errors
     if [ $? -ne 0 ]; then
@@ -103,6 +103,10 @@ argument_parse() {
             --relative-toggle-time)
                 led_relative_toggle_time="-r"
                 shift 1
+                ;;
+            --ip-addr)
+                SERVER_IP="$2"
+                shift 2
                 ;;
             --)
                 shift
@@ -162,6 +166,7 @@ argument_parse() {
     echo "CAPTURE_DURATION_S: ${CAPTURE_DURATION_S}"
     echo "NOMINAL_PERIOS_US: ${NOMINAL_PERIOD_US}"
     echo "LED_TOGGLE_OPTIONAL_PARAMS: ${LED_TOGGLE_OPTIONAL_PARAMS}"
+    echo "SERVER_IP: ${SERVER_IP}"
     echo "OUTPUT_DIR: ${OUTPUT_DIR}"
     echo "***************************"
 }
@@ -179,6 +184,7 @@ CAPTURE_DURATION_S="${CAPTURE_DURATION_S}"
 TEST_TYPE_FOLDER_NAME="${TEST_TYPE_FOLDER_NAME}"
 OUTPUT_DIR="${OUTPUT_DIR}"
 LED_TOGGLE_OPTIONAL_PARAMS=${LED_TOGGLE_OPTIONAL_PARAMS}
+SERVER_IP=${SERVER_IP}
 EOF
 }
 
