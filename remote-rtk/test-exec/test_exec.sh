@@ -86,10 +86,10 @@ timing_measurement() {
         local count=0
 
         # Capture System-wide SoftIRQs and Interrupts
-        mpstat -P ALL -n --dec=2 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_cpu_net.log" &
-        MPSTAT_CPUNET_PID=$!
-        mpstat -I SUM -P ALL --dec=2 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_interrupts.log" &
+        mpstat -I SUM -P ALL --dec=2 1 ${CAPTURE_DURATION_S_EXTENDED} -o JSON > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_sum_itr.log" &
         MPSTAT_INT_PID=$!
+        mpstat -A --dec=2 1 ${CAPTURE_DURATION_S_EXTENDED} -o JSON > "${OUTPUT_DIR}/${LOAD_TYPE}/mpstat_all.log" &
+        MPSTAT_ALL_PID=$!
 
         # Capture vmstat
         vmstat -twn 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/vmstat.log" &
@@ -117,7 +117,7 @@ timing_measurement() {
             # Safety timeout for the script to not hang
             if [ "$count" -ge $((timeout * 10)) ]; then
                 echo "<3>ERROR: Timed out waiting for led-toggle service to start!"
-                sudo kill -SIGKILL $CYCLIC_PID $VMSTAT_PID $MPSTAT_INT_PID $MPSTAT_CPUNET_PID || true
+                sudo kill -SIGKILL $CYCLIC_PID $VMSTAT_PID $MPSTAT_ALL_PID $MPSTAT_INT_PID || true
                 exit 1
             fi
         done
@@ -128,14 +128,14 @@ timing_measurement() {
 
         # Save pid state for future logging
         chrt -p ${PID_STAT_PID} > "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
-        chrt -p ${MPSTAT_CPUNET_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
         chrt -p ${MPSTAT_INT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -P ${MPSTAT_ALL_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
         chrt -p ${VMSTAT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
         chrt -p ${CYCLIC_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
     else
         # Cleanup and Finalize
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_end.txt"
-        sudo kill -SIGKILL $CYCLIC_PID $VMSTAT_PID $MPSTAT_INT_PID $MPSTAT_CPUNET_PID $PID_STAT_PID || true
+        sudo kill -SIGKILL $CYCLIC_PID $VMSTAT_PID $MPSTAT_ALL_PID $MPSTAT_INT_PID $PID_STAT_PID || true
     fi
 }
 

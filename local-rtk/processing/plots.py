@@ -1,5 +1,23 @@
 import matplotlib.pyplot as plt
 
+def plot_path(obj, type, name, combined=False):
+    # Check how to combine it
+    if combined == False:
+        if name == None or name == "":
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + ".png"
+        else:
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + name + ".png"
+    else:
+        if name == None or name == "":
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + ".png"
+        else:
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + name + ".png"
+    
+    # Combined result
+    combined_path = os.path.join(obj.input_dir, combined_path)
+    
+    return combined_path
+
 def _plot_histogram_rise(data, output_file, title=None, label=None, show=False):
     """
     Generates and saves a histogram of the jitter data.
