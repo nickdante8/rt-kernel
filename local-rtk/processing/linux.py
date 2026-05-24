@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from models import CyclictestMetrics, MpstatMetrics, CpuTimelineMetrics
 
 def cyclictest(data):
     # Extract thread 0 statistics
@@ -24,24 +25,19 @@ def cyclictest(data):
     else:
         std_dev = 0.0
 
-    return {
-        # Extract start/end dates
-        't0': data['start_time'],
-        't1': data['end_time'],
-        
-        # histogram and latency
-        'histogram': hist_data,
-        'latencies': latencies,
-        'frequencies': frequencies,
-
-        # Summary metrics
-        'cycles': total_cycles,
-        'min': thread_data['min'],
-        'max': thread_data['max'],
-        'avg': avg_lat,
-        'std_dev': std_dev,
-        'peak_to_peak': (thread_data['max'] - thread_data['min']) if len(latencies) > 0 else 0,
-    }
+    return CyclictestMetrics(
+        t0=data['start_time'],
+        t1=data['end_time'],
+        histogram=hist_data,
+        latencies=latencies,
+        frequencies=frequencies,
+        cycles=total_cycles,
+        min=thread_data['min'],
+        max=thread_data['max'],
+        avg=avg_lat,
+        std_dev=std_dev,
+        peak_to_peak=(thread_data['max'] - thread_data['min']) if len(latencies) > 0 else 0,
+    )
 
 def proc_interrupts(start_snap, end_snap, num_cpus):
     delta_records = []
@@ -70,16 +66,6 @@ def proc_interrupts(start_snap, end_snap, num_cpus):
     return delta_records
 
 def mpstat(data):
-    # Initialize the output structure
-    output = {
-        'cores': {},
-        'avg_user': 0.0,
-        'avg_system': 0.0,
-        'avg_irq': 0.0,
-        'avg_softirq': 0.0,
-        'avg_idle': 0.0
-    }
-    
     if not data or 'sysstat' not in data:
         return None
         
@@ -91,20 +77,22 @@ def mpstat(data):
     if not statistics:
         return None
 
+    cores_dict = {}
+
     # We need a helper to ensure a core dict is initialized
     def init_core(core_id):
-        if core_id not in output['cores']:
-            output['cores'][core_id] = {
-                'timestamps': [],
-                'usr': [],
-                'sys': [],
-                'iowait': [],
-                'soft': [],
-                'idle': [],
-                'intr': [],
-                'individual_interrupts': {},
-                'soft_interrupts': {}
-            }
+        if core_id not in cores_dict:
+            cores_dict[core_id] = CpuTimelineMetrics(
+                timestamps=[],
+                usr=[],
+                sys=[],
+                iowait=[],
+                soft=[],
+                idle=[],
+                intr=[],
+                individual_interrupts={},
+                soft_interrupts={}
+            )
 
     # Iterate through each timestamp
     for stat in statistics:
@@ -115,31 +103,31 @@ def mpstat(data):
         for load in cpu_load:
             core_id = str(load['cpu'])
             init_core(core_id)
-            core_dict = output['cores'][core_id]
+            core_metrics = cores_dict[core_id]
             
             # Use the length of 'timestamps' to determine if we've already appended the timestamp for this core
-            if len(core_dict['timestamps']) == 0 or core_dict['timestamps'][-1] != timestamp:
-                core_dict['timestamps'].append(timestamp)
+            if len(core_metrics.timestamps) == 0 or core_metrics.timestamps[-1] != timestamp:
+                core_metrics.timestamps.append(timestamp)
                 
-            core_dict['usr'].append(load.get('usr', 0.0))
-            core_dict['sys'].append(load.get('sys', 0.0))
-            core_dict['iowait'].append(load.get('iowait', 0.0))
-            core_dict['soft'].append(load.get('soft', 0.0))
-            core_dict['idle'].append(load.get('idle', 0.0))
+            core_metrics.usr.append(load.get('usr', 0.0))
+            core_metrics.sys.append(load.get('sys', 0.0))
+            core_metrics.iowait.append(load.get('iowait', 0.0))
+            core_metrics.soft.append(load.get('soft', 0.0))
+            core_metrics.idle.append(load.get('idle', 0.0))
 
         # 2. Process sum-interrupts
         sum_intr = stat.get('sum-interrupts', [])
         for intr in sum_intr:
             core_id = str(intr['cpu'])
             init_core(core_id)
-            output['cores'][core_id]['intr'].append(intr.get('intr', 0.0))
+            cores_dict[core_id].intr.append(intr.get('intr', 0.0))
             
         # 3. Process individual-interrupts
         indiv_intr = stat.get('individual-interrupts', [])
         for intr_group in indiv_intr:
             core_id = str(intr_group['cpu'])
             init_core(core_id)
-            indiv_dict = output['cores'][core_id]['individual_interrupts']
+            indiv_dict = cores_dict[core_id].individual_interrupts
             
             for intr_item in intr_group.get('intr', []):
                 name = intr_item['name']
@@ -153,7 +141,7 @@ def mpstat(data):
         for intr_group in soft_intr:
             core_id = str(intr_group['cpu'])
             init_core(core_id)
-            soft_dict = output['cores'][core_id]['soft_interrupts']
+            soft_dict = cores_dict[core_id].soft_interrupts
             
             for intr_item in intr_group.get('intr', []):
                 name = intr_item['name']
@@ -162,12 +150,14 @@ def mpstat(data):
                     soft_dict[name] = []
                 soft_dict[name].append(value)
 
+    output = MpstatMetrics(cores=cores_dict)
+
     # 5. Compute global averages for "all" core over the entire run
-    all_core = output['cores'].get('all')
-    if all_core and len(all_core['usr']) > 0:
-        output['avg_user'] = sum(all_core['usr']) / len(all_core['usr'])
-        output['avg_system'] = sum(all_core['sys']) / len(all_core['sys'])
-        output['avg_softirq'] = sum(all_core['soft']) / len(all_core['soft'])
-        output['avg_idle'] = sum(all_core['idle']) / len(all_core['idle'])
+    all_core = cores_dict.get('all')
+    if all_core and len(all_core.usr) > 0:
+        output.avg_user = sum(all_core.usr) / len(all_core.usr)
+        output.avg_system = sum(all_core.sys) / len(all_core.sys)
+        output.avg_softirq = sum(all_core.soft) / len(all_core.soft)
+        output.avg_idle = sum(all_core.idle) / len(all_core.idle)
     
     return output

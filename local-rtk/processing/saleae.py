@@ -1,3 +1,7 @@
+import pandas as pd
+import numpy as np
+from models import SaleaeSignalMetrics, SaleaeCrossMetrics
+
 def timing_analysis(obj, df, time_col, channel_col):
     """
     Calculates Jitter, Drift, Latency, and Phase based on a nominal period.
@@ -73,40 +77,33 @@ def timing_analysis(obj, df, time_col, channel_col):
     pulse_widths = rising_us - falling_us
     duty_cycles = (pulse_widths.astype(float) / obj.nominal_period_us) * 100
 
-    return {
-        # Reference time
-        'reference_time': t0,
-
-        # Time Axes
-        'time_jitter_rise': time_jitter_rise,  # For jitter_rise and drift_rise
-        'time_jitter_fall': time_jitter_fall,  # For jitter_fall and drift_fall
-        'time_pulse': time_pulse,              # For duty_cycles and pulse_widths
-        'nominal_period_us': obj.nominal_period_us,
-        
-        # Data Arrays
-        'edges_rise': rising_us,
-        'edges_fall': falling_us,
-        'jitter_rise': jitter_rise,
-        'jitter_fall': jitter_fall,
-        'drifts_rise': drift_rise,
-        'drifts_fall': drift_fall,
-        'duty_cycles': duty_cycles,
-        'pulse_widths': pulse_widths,
-        
-        # Metadata & Stats
-        'channel': channel_col,
-        'mean_jitter_rise_us': jitter_rise.mean() if len(jitter_rise) > 0 else 0,
-        'std_dev_rise_us': jitter_rise.std() if len(jitter_rise) > 0 else 0,
-        'max_jitter_rise_us': jitter_rise.max() if len(jitter_rise) > 0 else 0,
-        'min_jitter_rise_us': jitter_rise.min() if len(jitter_rise) > 0 else 0,
-        'peak_to_peak_jitter_rise_us': (jitter_rise.max() - jitter_rise.min()) if len(jitter_rise) > 0 else 0,
-        'mean_jitter_fall_us': jitter_fall.mean() if len(jitter_fall) > 0 else 0,
-        'std_dev_fall_us': jitter_fall.std() if len(jitter_fall) > 0 else 0,
-        'max_jitter_fall_us': jitter_fall.max() if len(jitter_fall) > 0 else 0,
-        'min_jitter_fall_us': jitter_fall.min() if len(jitter_fall) > 0 else 0,
-        'peak_to_peak_jitter_fall_us': (jitter_fall.max() - jitter_fall.min()) if len(jitter_fall) > 0 else 0,
-        'sample_count': len(df)
-    }
+    return SaleaeSignalMetrics(
+        reference_time=t0,
+        time_jitter_rise=time_jitter_rise,
+        time_jitter_fall=time_jitter_fall,
+        time_pulse=time_pulse,
+        nominal_period_us=obj.nominal_period_us,
+        edges_rise=rising_us,
+        edges_fall=falling_us,
+        jitter_rise=jitter_rise,
+        jitter_fall=jitter_fall,
+        drifts_rise=drift_rise,
+        drifts_fall=drift_fall,
+        duty_cycles=duty_cycles,
+        pulse_widths=pulse_widths,
+        channel_name=channel_col,
+        mean_jitter_rise_us=jitter_rise.mean() if len(jitter_rise) > 0 else 0,
+        std_dev_rise_us=jitter_rise.std() if len(jitter_rise) > 0 else 0,
+        max_jitter_rise_us=jitter_rise.max() if len(jitter_rise) > 0 else 0,
+        min_jitter_rise_us=jitter_rise.min() if len(jitter_rise) > 0 else 0,
+        peak_to_peak_jitter_rise_us=(jitter_rise.max() - jitter_rise.min()) if len(jitter_rise) > 0 else 0,
+        mean_jitter_fall_us=jitter_fall.mean() if len(jitter_fall) > 0 else 0,
+        std_dev_fall_us=jitter_fall.std() if len(jitter_fall) > 0 else 0,
+        max_jitter_fall_us=jitter_fall.max() if len(jitter_fall) > 0 else 0,
+        min_jitter_fall_us=jitter_fall.min() if len(jitter_fall) > 0 else 0,
+        peak_to_peak_jitter_fall_us=(jitter_fall.max() - jitter_fall.min()) if len(jitter_fall) > 0 else 0,
+        sample_count=len(df)
+    )
 
 def phase_shift_analysis(edges0, edges1, nominal_period_us):
     # Cross-Channel Calculations (Latency & Phase)
@@ -115,8 +112,8 @@ def phase_shift_analysis(edges0, edges1, nominal_period_us):
     latency = edges1[:min_len] - edges0[:min_len]
     phase_diff = (latency / nominal_period_us) * 360
 
-    return {
-        'latency': latency,
-        'phase': phase_diff,
-        'time_axis': edges0[:min_len]
-    }
+    return SaleaeCrossMetrics(
+        latency=latency,
+        phase=phase_diff,
+        time_axis=edges0[:min_len]
+    )

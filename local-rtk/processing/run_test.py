@@ -1,10 +1,6 @@
 import argparse
-import processing as proc
-
-
-# ---- Function -----
-# -------------------
-
+from models import ExperimentConfig
+from experiment import ExperimentProcessor, ExperimentPlotter
 
 # ------- MAIN ------
 # -------------------
@@ -19,28 +15,29 @@ def main():
     parser.add_argument('--channels', type=int, nargs='+', required=True, help='List of digital channels used for capture.')
     args = parser.parse_args()
 
-    # Create array of data to use in the loop
-    plots = []
+    # Create array of datasets to use in the loop
+    datasets = []
     for load_type in args.loads_type:
-        plots.append(proc.Plot_obj(args.input_dir, args.test_type, load_type, args.channels, args.nominal_period_us, args.duration_s))
+        config = ExperimentConfig(
+            input_dir=args.input_dir,
+            test_type=args.test_type,
+            load_type=load_type,
+            channels=args.channels,
+            nominal_period_us=args.nominal_period_us,
+            duration_s=args.duration_s
+        )
+        datasets.append(ExperimentProcessor(config))
 
-    # Load and process data
-    for plot in plots:
-        plot.load_and_process_datas()
+    # Load and process data, then generate plots
+    for dataset in datasets:
+        dataset.load_and_process_datas()
+        dataset.generate_all_plots()
 
-    # --- Data Analysis ---
-    for plot in plots:
-        proc.plot_histograms(plot)
-        proc.plot_phase_shift_combined(plot)
-        proc.plot_signal_drift(plot)
-        proc.plot_signal_drift_combined(plot)
-        proc.plot_interrupts_stacked_bar(plot)
-
-    # Check type of analysis to run
-    if len(args.loads_type) > 1:
-        # Multiple ploting with different load types is possible
-        for i in range(len(args.channels)):
-            proc.plot_duty_cycle_combined(plots[0], plots[1], i)
+    # Check type of analysis to run for cross-dataset plotting
+    if len(datasets) > 1:
+        # Multiple plotting with different load types is possible
+        for ch in args.channels:
+            ExperimentPlotter.plot_duty_cycle_combined(datasets[0], datasets[1], ch)
 
 if __name__ == '__main__':
     main()
