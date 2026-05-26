@@ -220,10 +220,8 @@ kernel_dependencies() {
         else
             echo "✓ Kernel version matches RT patch version."
         fi
-    fi
 
-    # RT Patch download and application
-    if [ "${DOWNLOAD_RT_PATCH}" = "true" ]; then
+        # RT Patch download and application
         echo "=============================================================================="
         local patch_local_path="${SCRIPT_DIR}/${RT_PATCH_FILE}"
         if [ ! -f "${patch_local_path}" ]; then
