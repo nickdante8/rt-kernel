@@ -122,16 +122,16 @@ timing_measurement() {
             fi
         done
 
-        echo "Found led-toggle PID: $Pled_pid}"
+        echo "Found led-toggle PID: ${led_pid}"
         pidstat -p "${led_pid}",$(pgrep iperf3),$(pgrep fio) -u -w 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/pidstat.log" &
         PID_STAT_PID=$!
 
         # Save pid state for future logging
-        chrt -p ${PID_STAT_PID} > "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
-        chrt -p ${MPSTAT_INT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
-        chrt -P ${MPSTAT_ALL_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${MPSTAT_INT_PID} > "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${MPSTAT_ALL_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
         chrt -p ${VMSTAT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
         chrt -p ${CYCLIC_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
+        chrt -p ${PID_STAT_PID} >> "${OUTPUT_DIR}/${LOAD_TYPE}/pid_chrt.log"
     else
         # Cleanup and Finalize
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_end.txt"

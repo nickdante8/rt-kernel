@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import os
 
 def plot_path(obj, type, name, combined=False):
     # Check how to combine it
