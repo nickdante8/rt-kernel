@@ -3,12 +3,14 @@ Logic.AppImage
 
 # Folders
 local-rtk/test_results
+linux
 
 # Files
 local-rtk/saleae.log
 service-env-var
 .setup_file_current
 *.png
+patch*
 
 # Bash specific
 
