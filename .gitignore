@@ -4,6 +4,7 @@ Logic.AppImage
 # Folders
 local-rtk/test_results
 linux
+dist
 
 # Files
 local-rtk/saleae.log

@@ -55,8 +55,8 @@ environment_var() {
 
     echo "=============================================================================="
     # Check configuration variables
-    if [ -z "${BUILD_DIR}" ] || [ -z "${KERNEL_REPO}" ] || [ -z "${KERNEL_BRANCH}" ]; then
-        echo "ERROR: Required variables (BUILD_DIR, KERNEL_REPO, KERNEL_BRANCH) are not set in config.env."
+    if [ -z "${BUILD_DIR_PATH}" ] || [ -z "${KERNEL_REPO}" ] || [ -z "${KERNEL_BRANCH}" ]; then
+        echo "ERROR: Required variables (BUILD_DIR_PATH, KERNEL_REPO, KERNEL_BRANCH) are not set in config.env."
         exit 1
     fi
 
@@ -109,27 +109,27 @@ kernel_dependencies() {
     # Make sure to find for the specific kernel version in git commits.
     if [ -n "${KERNEL_REVISION}" ]; then
         echo "Using specific kernel revision: ${KERNEL_REVISION}"
-        if [ ! -d "${BUILD_DIR}" ]; then
-            echo "Kernel source directory not found at: ${BUILD_DIR}"
+        if [ ! -d "${BUILD_DIR_PATH}" ]; then
+            echo "Kernel source directory not found at: ${BUILD_DIR_PATH}"
             echo "Initializing git repository and fetching revision..."
-            mkdir -p "${BUILD_DIR}"
-            git -C "${BUILD_DIR}" init
-            git -C "${BUILD_DIR}" remote add origin "${KERNEL_REPO}"
-            git -C "${BUILD_DIR}" fetch --depth 1 origin "${KERNEL_REVISION}"
-            git -C "${BUILD_DIR}" checkout FETCH_HEAD
+            mkdir -p "${BUILD_DIR_PATH}"
+            git -C "${BUILD_DIR_PATH}" init
+            git -C "${BUILD_DIR_PATH}" remote add origin "${KERNEL_REPO}"
+            git -C "${BUILD_DIR_PATH}" fetch --depth 1 origin "${KERNEL_REVISION}"
+            git -C "${BUILD_DIR_PATH}" checkout FETCH_HEAD
             echo "✓ Checked out revision successfully."
         else
-            echo "Kernel source directory already exists at: ${BUILD_DIR}"
+            echo "Kernel source directory already exists at: ${BUILD_DIR_PATH}"
             # Verify it is a valid git repository
-            if ! git -C "${BUILD_DIR}" rev-parse --is-inside-work-tree &>/dev/null; then
-                echo "ERROR: Directory ${BUILD_DIR} exists but is not a valid Git repository."
+            if ! git -C "${BUILD_DIR_PATH}" rev-parse --is-inside-work-tree &>/dev/null; then
+                echo "ERROR: Directory ${BUILD_DIR_PATH} exists but is not a valid Git repository."
                 echo "Please delete or move it and re-run this script."
                 exit 1
             fi
             
             # Check if current commit matches KERNEL_REVISION
             local current_commit
-            current_commit=$(git -C "${BUILD_DIR}" rev-parse HEAD 2>/dev/null || true)
+            current_commit=$(git -C "${BUILD_DIR_PATH}" rev-parse HEAD 2>/dev/null || true)
             if [ "${current_commit}" = "${KERNEL_REVISION}" ]; then
                 echo "✓ Git repository is already at the correct revision: ${KERNEL_REVISION}"
             else
@@ -137,36 +137,36 @@ kernel_dependencies() {
                 read -p "Would you like to fetch and switch to '${KERNEL_REVISION}'? (y/N) " -n 1 -r
                 echo
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    git -C "${BUILD_DIR}" fetch --depth 1 origin "${KERNEL_REVISION}"
-                    git -C "${BUILD_DIR}" checkout FETCH_HEAD
+                    git -C "${BUILD_DIR_PATH}" fetch --depth 1 origin "${KERNEL_REVISION}"
+                    git -C "${BUILD_DIR_PATH}" checkout FETCH_HEAD
                     echo "✓ Switched to revision successfully."
                 fi
             fi
         fi
     else
         # Clone or Update the Kernel Source based on KERNEL_BRANCH
-        if [ ! -d "${BUILD_DIR}" ]; then
-            echo "Kernel source directory not found at: ${BUILD_DIR}"
+        if [ ! -d "${BUILD_DIR_PATH}" ]; then
+            echo "Kernel source directory not found at: ${BUILD_DIR_PATH}"
             echo "Cloning repository: ${KERNEL_REPO}"
             echo "Branch: ${KERNEL_BRANCH} (Depth: ${KERNEL_DEPTH})"
             echo "<4> WARNING: If kernel headers are required separately, install them by running 'sudo apt install linux-headers-rpi-v8'. \
                 Check https://www.raspberrypi.com/documentation/computers/linux_kernel.html#kernel-headers for more info."
             
             # We run git clone. Depth 1 saves a lot of space and time.
-            git clone --branch "${KERNEL_BRANCH}" --depth "${KERNEL_DEPTH}" "${KERNEL_REPO}" "${BUILD_DIR}"
+            git clone --branch "${KERNEL_BRANCH}" --depth "${KERNEL_DEPTH}" "${KERNEL_REPO}" "${BUILD_DIR_PATH}"
             echo "✓ Cloned successfully."
         else
-            echo "Kernel source directory already exists at: ${BUILD_DIR}"
+            echo "Kernel source directory already exists at: ${BUILD_DIR_PATH}"
             
             # Verify it is a valid git repository
-            if ! git -C "${BUILD_DIR}" rev-parse --is-inside-work-tree &>/dev/null; then
-                echo "ERROR: Directory ${BUILD_DIR} exists but is not a valid Git repository."
+            if ! git -C "${BUILD_DIR_PATH}" rev-parse --is-inside-work-tree &>/dev/null; then
+                echo "ERROR: Directory ${BUILD_DIR_PATH} exists but is not a valid Git repository."
                 echo "Please delete or move it and re-run this script."
                 exit 1
             fi
 
             # Check current branch
-            CURRENT_BRANCH=$(git -C "${BUILD_DIR}" branch --show-current 2>/dev/null || git -C "${BUILD_DIR}" rev-parse --abbrev-ref HEAD)
+            CURRENT_BRANCH=$(git -C "${BUILD_DIR_PATH}" branch --show-current 2>/dev/null || git -C "${BUILD_DIR_PATH}" rev-parse --abbrev-ref HEAD)
             
             if [ "${CURRENT_BRANCH}" = "${KERNEL_BRANCH}" ]; then
                 echo "✓ Git repository is on the correct branch: ${KERNEL_BRANCH}"
@@ -174,7 +174,7 @@ kernel_dependencies() {
                 echo
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
                     echo "Pulling latest changes..."
-                    git -C "${BUILD_DIR}" pull
+                    git -C "${BUILD_DIR_PATH}" pull
                 fi
             else
                 echo "WARNING: Repository is currently on branch '${CURRENT_BRANCH}', but config.env specifies '${KERNEL_BRANCH}'."
@@ -183,9 +183,9 @@ kernel_dependencies() {
                 if [[ $REPLY =~ ^[Yy]$ ]]; then
                     echo "Fetching branch '${KERNEL_BRANCH}'..."
                     # Try to fetch branch in case it doesn't exist locally
-                    git -C "${BUILD_DIR}" fetch origin "${KERNEL_BRANCH}":"${KERNEL_BRANCH}" --depth "${KERNEL_DEPTH}" || true
+                    git -C "${BUILD_DIR_PATH}" fetch origin "${KERNEL_BRANCH}":"${KERNEL_BRANCH}" --depth "${KERNEL_DEPTH}" || true
                     echo "Checking out '${KERNEL_BRANCH}'..."
-                    git -C "${BUILD_DIR}" checkout "${KERNEL_BRANCH}"
+                    git -C "${BUILD_DIR_PATH}" checkout "${KERNEL_BRANCH}"
                 else
                     echo "Remaining on current branch. Note that compilation might not target the configured version."
                 fi
@@ -195,16 +195,16 @@ kernel_dependencies() {
 
     # Verify kernel version matches patch version if patching is enabled
     if [ "${DOWNLOAD_RT_PATCH}" = "true" ]; then
-        if [ ! -f "${BUILD_DIR}/Makefile" ]; then
-            echo "ERROR: Makefile not found in ${BUILD_DIR}. Source check-out seems incomplete."
+        if [ ! -f "${BUILD_DIR_PATH}/Makefile" ]; then
+            echo "ERROR: Makefile not found in ${BUILD_DIR_PATH}. Source check-out seems incomplete."
             exit 1
         fi
         local k_ver
         local k_pat
         local k_sub
-        k_ver=$(grep -E "^VERSION =" "${BUILD_DIR}/Makefile" | awk '{print $3}')
-        k_pat=$(grep -E "^PATCHLEVEL =" "${BUILD_DIR}/Makefile" | awk '{print $3}')
-        k_sub=$(grep -E "^SUBLEVEL =" "${BUILD_DIR}/Makefile" | awk '{print $3}')
+        k_ver=$(grep -E "^VERSION =" "${BUILD_DIR_PATH}/Makefile" | awk '{print $3}')
+        k_pat=$(grep -E "^PATCHLEVEL =" "${BUILD_DIR_PATH}/Makefile" | awk '{print $3}')
+        k_sub=$(grep -E "^SUBLEVEL =" "${BUILD_DIR_PATH}/Makefile" | awk '{print $3}')
         local checked_out_version="${k_ver}.${k_pat}.${k_sub}"
         
         # Extract version from RT_PATCH_FILE (e.g. patch-6.18.13-rt4.patch.xz)
@@ -234,29 +234,29 @@ kernel_dependencies() {
             echo "✓ RT patch already downloaded at: ${patch_local_path}"
         fi
         
-        if [ -d "${BUILD_DIR}" ]; then
+        if [ -d "${BUILD_DIR_PATH}" ]; then
             echo "Checking if RT patch needs to be applied..."
             # Configure git identity locally to avoid patch commit failure
-            git -C "${BUILD_DIR}" config user.name "RT Build System"
-            git -C "${BUILD_DIR}" config user.email "rt-build@localhost"
+            git -C "${BUILD_DIR_PATH}" config user.name "RT Build System"
+            git -C "${BUILD_DIR_PATH}" config user.email "rt-build@localhost"
 
             # Check if patch is already applied (via git commit message)
-            if git -C "${BUILD_DIR}" log -n 5 --format="%s" 2>/dev/null | grep -q "Apply PREEMPT_RT patch"; then
+            if git -C "${BUILD_DIR_PATH}" log -n 5 --format="%s" 2>/dev/null | grep -q "Apply PREEMPT_RT patch"; then
                 echo "✓ RT patch is already applied to git history."
             else
                 echo "Applying RT patch to the kernel source tree..."
                 # Check if it applies cleanly via git apply
-                if xzcat "${patch_local_path}" | git -C "${BUILD_DIR}" apply --check - &>/dev/null; then
-                    xzcat "${patch_local_path}" | git -C "${BUILD_DIR}" apply -
-                    git -C "${BUILD_DIR}" add .
-                    git -C "${BUILD_DIR}" commit -m "Apply PREEMPT_RT patch: ${RT_PATCH_FILE}"
+                if xzcat "${patch_local_path}" | git -C "${BUILD_DIR_PATH}" apply --check - &>/dev/null; then
+                    xzcat "${patch_local_path}" | git -C "${BUILD_DIR_PATH}" apply -
+                    git -C "${BUILD_DIR_PATH}" add .
+                    git -C "${BUILD_DIR_PATH}" commit -m "Apply PREEMPT_RT patch: ${RT_PATCH_FILE}"
                     echo "✓ RT patch applied and committed successfully."
                 else
                     echo "WARNING: Git apply check failed. Attempting with standard patch command..."
-                    if xzcat "${patch_local_path}" | patch -p1 -d "${BUILD_DIR}" --dry-run &>/dev/null; then
-                        xzcat "${patch_local_path}" | patch -p1 -d "${BUILD_DIR}"
-                        git -C "${BUILD_DIR}" add .
-                        git -C "${BUILD_DIR}" commit -m "Apply PREEMPT_RT patch: ${RT_PATCH_FILE} (using patch utility)"
+                    if xzcat "${patch_local_path}" | patch -p1 -d "${BUILD_DIR_PATH}" --dry-run &>/dev/null; then
+                        xzcat "${patch_local_path}" | patch -p1 -d "${BUILD_DIR_PATH}"
+                        git -C "${BUILD_DIR_PATH}" add .
+                        git -C "${BUILD_DIR_PATH}" commit -m "Apply PREEMPT_RT patch: ${RT_PATCH_FILE} (using patch utility)"
                         echo "✓ RT patch applied and committed successfully using patch utility."
                     else
                         echo "ERROR: RT patch does not apply cleanly to the selected branch."

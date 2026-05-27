@@ -29,16 +29,16 @@ environment_var() {
 
     echo "=============================================================================="
     # Check configuration variables
-    if [ -z "${BUILD_DIR}" ] || [ -z "${ARCH}" ] || [ -z "${CROSS_COMPILE}" ] || [ -z "${DEFCONFIG}" ] || [ -z "${KERNEL_NAME}" ]; then
-        echo "ERROR: Required variables (BUILD_DIR, ARCH, CROSS_COMPILE, DEFCONFIG, KERNEL_NAME) are not set in config.env."
+    if [ -z "${BUILD_DIR_PATH}" ] || [ -z "${ARCH}" ] || [ -z "${CROSS_COMPILE}" ] || [ -z "${DEFCONFIG}" ] || [ -z "${KERNEL_NAME}" ]; then
+        echo "ERROR: Required variables (BUILD_DIR_PATH, ARCH, CROSS_COMPILE, DEFCONFIG, KERNEL_NAME) are not set in config.env."
         exit 1
     fi
 
     # Export KERNEL variable as required by Raspberry Pi build process
     export KERNEL="${KERNEL_NAME}"
 
-    if [ ! -d "${BUILD_DIR}" ]; then
-        echo "ERROR: Kernel source directory not found at ${BUILD_DIR}"
+    if [ ! -d "${BUILD_DIR_PATH}" ]; then
+        echo "ERROR: Kernel source directory not found at ${BUILD_DIR_PATH}"
         echo "Please run ./setup.sh first to prepare the kernel source tree."
         exit 1
     fi
@@ -47,7 +47,7 @@ environment_var() {
 # For custom configuration arguments to reconfigure some behaviour
 argument_parse() {
     # Ensure scripts/config is executable
-    CONFIG_CMD="${BUILD_DIR}/scripts/config"
+    CONFIG_CMD="${BUILD_DIR_PATH}/scripts/config"
     if [ ! -f "${CONFIG_CMD}" ]; then
         echo "ERROR: scripts/config utility not found in kernel source tree."
         exit 1
@@ -70,97 +70,97 @@ argument_parse() {
 
 # Kernel configuration
 config_kernel() {
-    echo "Starting configuration for kernel source at: ${BUILD_DIR}"
+    echo "Starting configuration for kernel source at: ${BUILD_DIR_PATH}"
     echo "=============================================================================="
 
     # Apply Defconfig for default configuration and build the sources and Device Tree files
     echo "Applying base configuration: ${DEFCONFIG}..."
-    make -C "${BUILD_DIR}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" "${DEFCONFIG}"
+    make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" "${DEFCONFIG}"
     echo "✓ Base configuration applied."
 
     # Apply Programmatic Tweaks
     echo "Applying RT and stripping options to .config..."
 
     # Enable EXPERT mode (often required to enable PREEMPT_RT or disable core features)
-    "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable EXPERT
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable EXPERT
 
     # Enable High Resolution Timers (critical for precision in both, but essential for RT)
-    "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable HIGH_RES_TIMERS
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HIGH_RES_TIMERS
 
     # PREEMPT_RT and specific Baseline settings
     if [ "${ENABLE_RT}" = "true" ]; then
         echo "-> Configuring for RT (Real-Time)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable PREEMPT_RT
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT_RT
         
         # Disable standard/conflicting preempt models
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT_NONE
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT_VOLUNTARY
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_NONE
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_VOLUNTARY
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT
         
         # Timer frequency 1000 Hz for RT
         echo "-> Setting timer frequency to 1000 Hz..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable HZ_1000
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_100
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_250
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_300
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --set-val HZ 1000
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_1000
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_250
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 1000
         
         # RCU no-callbacks configuration (often used for isolating cores in RT)
         echo "-> Enabling RCU no-callback support (RCU_NOCB_CPU)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable RCU_NOCB_CPU
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable RCU_NOCB_CPU
     else
         echo "-> Configuring for Baseline (Non-RT)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT_RT
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_RT
         
         # Enable standard preempt (Typical default for Raspberry Pi desktop/baseline)
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable PREEMPT
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT_NONE
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable PREEMPT_VOLUNTARY
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_NONE
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_VOLUNTARY
         
         # Timer frequency 250 Hz for baseline (Standard trade-off for performance/power)
         echo "-> Setting timer frequency to 250 Hz..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable HZ_250
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_100
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_300
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable HZ_1000
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --set-val HZ 250
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_250
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_1000
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 250
         
         # Disable RCU no-callbacks for standard baseline behavior
         echo "-> Disabling RCU no-callback support..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable RCU_NOCB_CPU
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable RCU_NOCB_CPU
     fi
 
     # Localversion Suffix
     if [ -n "${LOCALVERSION}" ]; then
         echo "-> Setting LOCALVERSION suffix to: ${LOCALVERSION}"
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --set-str LOCALVERSION "${LOCALVERSION}"
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-str LOCALVERSION "${LOCALVERSION}"
     fi
 
     # Subsystem/Driver Stripping
     if [ "${STRIP_SOUND}" = "true" ]; then
         echo "-> Stripping Sound support..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable SOUND
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable SOUND
     fi
 
     if [ "${STRIP_WIFI}" = "true" ]; then
         echo "-> Stripping Wi-Fi drivers and stack..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable CFG80211
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable MAC80211
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CFG80211
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable MAC80211
     fi
 
     if [ "${STRIP_BLUETOOTH}" = "true" ]; then
         echo "-> Stripping Bluetooth drivers and stack..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable BT
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BT
     fi
 
     if [ "${STRIP_VIDEO}" = "true" ]; then
         echo "-> Stripping DRM/Video drivers..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --disable DRM
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable DRM
     fi
 
     echo "=============================================================================="
     echo "Resolving configuration dependencies (make olddefconfig)..."
-    make -C "${BUILD_DIR}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
+    make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
     echo "✓ Configuration dependencies resolved."
     echo "=============================================================================="
 
@@ -172,7 +172,7 @@ config_kernel() {
         read -r
         
         # Launch menuconfig
-        make -C "${BUILD_DIR}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" menuconfig
+        make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" menuconfig
     else
         echo "Non-interactive mode requested. Skipping menuconfig."
     fi
@@ -184,15 +184,15 @@ config_validation() {
     echo "=============================================================================="
     echo "Validating configuration..."
     if [ "${ENABLE_RT}" = "true" ]; then
-        if ! grep -q "CONFIG_PREEMPT_RT=y" "${BUILD_DIR}/.config"; then
+        if ! grep -q "CONFIG_PREEMPT_RT=y" "${BUILD_DIR_PATH}/.config"; then
             echo "WARNING: CONFIG_PREEMPT_RT=y is NOT enabled in .config!"
             echo "This kernel will NOT be compiled with real-time support."
             echo
             read -p "Would you like to force-enable PREEMPT_RT and resolve configs again? (Y/n) " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]] || [ -z "$REPLY" ]; then
-                "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --enable PREEMPT_RT
-                make -C "${BUILD_DIR}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
+                "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT_RT
+                make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
                 echo "✓ Force-enabled PREEMPT_RT and resolved dependencies."
             fi
         else
@@ -201,14 +201,14 @@ config_validation() {
     fi
 
     # Validate LOCALVERSION
-    CURRENT_LV=$("${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --value LOCALVERSION || true)
+    CURRENT_LV=$("${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --value LOCALVERSION || true)
     if [ "${CURRENT_LV}" != "${LOCALVERSION}" ]; then
         echo "WARNING: LOCALVERSION is set to '${CURRENT_LV}', expected '${LOCALVERSION}'."
         read -p "Would you like to correct this? (Y/n) " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]] || [ -z "$REPLY" ]; then
-            "${CONFIG_CMD}" --file "${BUILD_DIR}/.config" --set-str LOCALVERSION "${LOCALVERSION}"
-            make -C "${BUILD_DIR}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
+            "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-str LOCALVERSION "${LOCALVERSION}"
+            make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" olddefconfig
         fi
     else
         echo "✓ LOCALVERSION suffix is verified ('${LOCALVERSION}')."
@@ -222,7 +222,7 @@ config_backup() {
     mkdir -p "${BACKUP_DIR}"
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
     BACKUP_FILE="${BACKUP_DIR}/config-${TIMESTAMP}${LOCALVERSION}"
-    cp "${BUILD_DIR}/.config" "${BACKUP_FILE}"
+    cp "${BUILD_DIR_PATH}/.config" "${BACKUP_FILE}"
     ln -sf "config-${TIMESTAMP}" "${BACKUP_DIR}/last_config"
 }
 
