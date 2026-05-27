@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 CONFIG_FILE="${SCRIPT_DIR}/config.env"
 
+
 # ==============================================================================
 # 2. HELPER FUNCTIONS
 # ==============================================================================
@@ -38,70 +39,260 @@ environment_var() {
         echo "ERROR: SSH connection details (SSH_USER, SSH_HOST, REMOTE_BOOT_DIR) are missing in config.env."
         exit 1
     fi
+
+    # Set helper variables
+    PIN_USB_IRQ_NAME="pin-usb-irq"
+    PIN_USB_IRQ_REMOTE_PATH="/usr/local/bin/${PIN_USB_IRQ_NAME}.sh"
+    SWITCH_KERNEL_NAME="switch-kernel"
+    SWITCH_KERNEL_REMOTE_PATH="/usr/local/bin/${SWITCH_KERNEL_NAME}.sh"
+
+    # Determine OS_PREFIX directory name
+    if [ "${ENABLE_RT}" = "true" ]; then
+        OS_PREFIX="${KERNEL_VERSION_MAJOR_MINOR}.${KERNEL_VERSION_PATCH}-rt"
+    else
+        OS_PREFIX="${KERNEL_VERSION_MAJOR_MINOR}.${KERNEL_VERSION_PATCH}-baseline"
+    fi
+
+    # Ensure .sshpass file exists
+    if [ ! -f "${SCRIPT_DIR}/.sshpass" ]; then
+        echo "ERROR: File ${SCRIPT_DIR}/.sshpass doesn't exist. Create it and save your SSH password to it."
+        exit 1
+    fi
+
+    # Set up SSH and SCP commands globally using sshpass
+    SSH_CMD="sshpass -f ${SCRIPT_DIR}/.sshpass ssh -p ${SSH_PORT} -o StrictHostKeyChecking=no"
+    SCP_CMD="sshpass -f ${SCRIPT_DIR}/.sshpass scp -P ${SSH_PORT} -o StrictHostKeyChecking=no"
 }
 
 # Deploy kernel to remote device
 deploy_kernel() {
     echo "=============================================================================="
-    echo "Deploying Kernel to ${SSH_USER}@${SSH_HOST}"
+    echo "Deploying Kernel ${OS_PREFIX} to ${SSH_USER}@${SSH_HOST}"
     echo "=============================================================================="
-
-    # Set up SSH and SCP commands with the specified port
-    SSH_CMD="ssh -p ${SSH_PORT}"
-    SCP_CMD="scp -P ${SSH_PORT}"
     
     echo "-> 1. Preparing remote temporary staging area: ${REMOTE_TEMP_DIR}"
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "rm -rf ${REMOTE_TEMP_DIR} && mkdir -p ${REMOTE_TEMP_DIR}"
 
-    echo "-> 2. Transferring kernel image, device trees, and overlays..."
-    ${SCP_CMD} -r "${DIST_DIR}/boot" "${SSH_USER}@${SSH_HOST}:${REMOTE_TEMP_DIR}/"
+    echo "-> 2. Transferring kernel image, device trees, overlays and loadable kernel modules..."
+    ${SCP_CMD} -r "${DIST_DIR}" "${SSH_USER}@${SSH_HOST}:${REMOTE_TEMP_DIR}/"
     
-    echo "-> 3. Transferring loadable kernel modules..."
-    ${SCP_CMD} -r "${DIST_DIR}/modules" "${SSH_USER}@${SSH_HOST}:${REMOTE_TEMP_DIR}/"
+    echo "-> 3. Installing files on the Raspberry Pi (Requires sudo privileges on remote)..."
+    
+    # -------------------------------------------------------------------------
+    # MODULE INSTALLATION (SSH vs SD Card):
+    # In the official RPi docs (SD card method), this is where you would see:
+    # "sudo env PATH=$PATH make INSTALL_MOD_PATH=mnt/root modules_install"
+    #
+    # Because we deploy over SSH, make.sh already safely extracted these 
+    # modules into our local dist/ folder without needing sudo. 
+    # Here, we simply move those pre-extracted modules into the Pi's live /lib/modules/
+    # -------------------------------------------------------------------------
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_TEMP_DIR}/${BUILD_DIR_NAME}/modules/lib/modules/* /lib/modules/"
+    
+    # Create the os_prefix directory in the boot partition
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S mkdir -p ${REMOTE_BOOT_DIR}/${OS_PREFIX}"
 
-    echo "-> 4. Installing files on the Raspberry Pi (Requires sudo privileges on remote)..."
-    
-    # Install modules to /lib/modules
-    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "sudo cp -r ${REMOTE_TEMP_DIR}/modules/lib/modules/* /lib/modules/"
-    
-    # Backup existing custom kernel image just in case (we don't backup the default kernel8.img)
-    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
-        if [ -f ${REMOTE_BOOT_DIR}/${KERNEL_IMG_NAME} ]; then 
-            sudo cp ${REMOTE_BOOT_DIR}/${KERNEL_IMG_NAME} ${REMOTE_BOOT_DIR}/${KERNEL_IMG_NAME}.bak
-            echo '   (Backed up existing ${KERNEL_IMG_NAME} to ${KERNEL_IMG_NAME}.bak)'
+    # Install boot files (image, dtbs, overlays) to the isolated os_prefix directory
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_TEMP_DIR}/${BUILD_DIR_NAME}/boot/* ${REMOTE_BOOT_DIR}/${OS_PREFIX}"
+
+    # If the overlays directory is missing (which happens when building pure mainline kernels),
+    # borrow the factory overlays from the Raspberry Pi OS.
+    ${SSH_CMD} -t "${SSH_USER}@${SSH_HOST}" "
+        if [ ! -d ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays ]; then
+            echo '   Notice: overlays directory missing in build. Borrowing factory overlays from Pi OS...'
+            echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_BOOT_DIR}/overlays ${REMOTE_BOOT_DIR}/${OS_PREFIX}
+        elif [ -z \"\$(ls -A ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays 2>/dev/null)\" ]; then
+            echo '   Notice: overlays directory exists but has no files. Borrowing factory overlays from Pi OS...'
+            echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_BOOT_DIR}/overlays/* ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays/
         fi
     "
-
-    # Install boot files (image, dtbs, overlays) to the boot firmware directory
-    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "sudo cp -r ${REMOTE_TEMP_DIR}/boot/* ${REMOTE_BOOT_DIR}/"
-
-    # Ensure config.txt points to our new kernel
-    echo "-> 5. Verifying config.txt boot entry..."
-    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
-        if ! grep -q '^kernel=${KERNEL_IMG_NAME}' ${REMOTE_BOOT_DIR}/config.txt; then
-            echo '   (Adding kernel=${KERNEL_IMG_NAME} to config.txt)'
-            echo -e '\n[all]\nkernel=${KERNEL_IMG_NAME}' | sudo tee -a ${REMOTE_BOOT_DIR}/config.txt > /dev/null
-        else
-            echo '   (kernel=${KERNEL_IMG_NAME} already exists in config.txt)'
-        fi
-    "
-
-    echo "-> 6. Cleaning up remote temporary files..."
+    
+    echo "-> Cleaning up remote temporary files..."
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "rm -rf ${REMOTE_TEMP_DIR}"
 
     echo "=============================================================================="
     echo "Deployment Successful!"
     echo "Your new kernel has been installed."
-    echo "Reboot the Raspberry Pi (sudo reboot) and run 'uname -r' to verify."
+    echo "Before reboot make sure that the dual-boot and the right kernel is selected."
+    echo "After the Raspberry Pi (sudo reboot), run 'uname -r' to verify active kernel."
     echo "=============================================================================="
+
+    # Ensure dual-boot config and boot parameters are set up
+    echo "-> Configuring Boot parameters..."
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
+        # Extract base command line parameters safely
+        BASE_CMDLINE=\$(cat ${REMOTE_BOOT_DIR}/cmdline.txt | sed -e 's/isolcpus=[^ ]*//g' -e 's/rcu_nocbs=[^ ]*//g' -e 's/nohz_full=[^ ]*//g' -e 's/irqaffinity=[^ ]*//g' -e 's/dwc_otg.fiq_enable=0//g' -e 's/dwc_otg.fiq_fsm_enable=0//g' | xargs)
+        
+        # Create the appropriate cmdline.txt inside the os_prefix folder
+        if [ \"${ENABLE_RT}\" = \"true\" ]; then
+            RT_FLAGS=\"isolcpus=2,3 rcu_nocbs=2,3 nohz_full=2,3 irqaffinity=0,1 dwc_otg.fiq_enable=0 dwc_otg.fiq_fsm_enable=0\"
+            echo \"\$BASE_CMDLINE \$RT_FLAGS\" > /tmp/cmdline.txt
+        else
+            echo \"\$BASE_CMDLINE\" > /tmp/cmdline.txt
+        fi
+        echo '$(cat .sshpass)' | sudo -S bash -c \"cat /tmp/cmdline.txt > ${REMOTE_BOOT_DIR}/${OS_PREFIX}/cmdline.txt && rm -f /tmp/cmdline.txt\"
+    "
+}
+
+# Create remote helper files which will be copied to remote target
+dual_boot_helpers() {
+    local helper_remote_dir="${SCRIPT_DIR}/helper_remote"
+
+    # Check if folder exist
+    if [ ! -d "${helper_remote_dir}" ]; then
+        echo "Folder ${helper_remote_dir} is missing. Creating it..."
+        mkdir -p "${helper_remote_dir}"
+    fi
+
+    # Generate the IRQ Pinning script
+    cat << 'EOF' > "${helper_remote_dir}/${PIN_USB_IRQ_NAME}.sh"
+#!/bin/bash
+# Find the IRQ for the USB/Ethernet controller (dwc2 or dwc_otg)
+IRQ=$(grep -E 'dwc2|dwc_otg' /proc/interrupts | awk '{print $1}' | tr -d ':')
+if [ -n "$IRQ" ]; then
+    # 4 is the hex bitmask for Core 2 (0b0100)
+    echo 4 > /proc/irq/$IRQ/smp_affinity
+    echo "Pinned USB/Eth IRQ $IRQ to Core 2"
+else
+    echo "Could not find dwc2/dwc_otg IRQ"
+fi
+EOF
+
+    # Create the systemd service for IRQ Pinning
+    # Note: Using unquoted EOF to expand local bash variables during file creation
+    cat << EOF > "${helper_remote_dir}/${PIN_USB_IRQ_NAME}.service"
+[Unit]
+Description=Pin USB/Ethernet IRQ to Core 2
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=${PIN_USB_IRQ_REMOTE_PATH}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Generate the switch-kernel tool
+    # Note: Escaping $1 so it passes through to the bash script, but letting 
+    # ${REMOTE_BOOT_DIR} and ${PIN_USB_IRQ_NAME} expand automatically!
+    cat << EOF > "${helper_remote_dir}/${SWITCH_KERNEL_NAME}.sh"
+#!/bin/bash
+
+if [ -z "\$1" ]; then
+    echo "Usage: sudo switch-kernel [prefix_name|default]"
+    echo "Example: sudo switch-kernel 6.18.13-rt"
+    exit 1
+fi
+
+# Strip any existing os_prefix or custom kernel definitions to ensure a clean slate
+sed -i '/^os_prefix=/d' ${REMOTE_BOOT_DIR}/config.txt
+sed -i '/^kernel=/d' ${REMOTE_BOOT_DIR}/config.txt
+
+if [ "\$1" == "default" ]; then
+    systemctl disable ${PIN_USB_IRQ_NAME}.service
+    echo "Switched to Factory Default kernel. Reboot to apply."
+else
+    PREFIX_DIR="${REMOTE_BOOT_DIR}/\$1"
+    if [ ! -d "\$PREFIX_DIR" ]; then
+        echo "ERROR: Kernel prefix directory '\$PREFIX_DIR' does not exist!"
+        exit 1
+    fi
+    
+    echo "os_prefix=\$1/" >> ${REMOTE_BOOT_DIR}/config.txt
+    
+    # Automatically enable IRQ pinning if the prefix implies an RT kernel
+    if [[ "\$1" == *"-rt"* ]]; then
+        systemctl enable ${PIN_USB_IRQ_NAME}.service
+        echo "Switched to RT kernel (\$1). IRQ Pinning ENABLED. Reboot to apply."
+    else
+        systemctl disable ${PIN_USB_IRQ_NAME}.service
+        echo "Switched to Baseline kernel (\$1). IRQ Pinning DISABLED. Reboot to apply."
+    fi
+fi
+EOF
+
+    # Make sh files executable
+    chmod +x "${helper_remote_dir}/${PIN_USB_IRQ_NAME}.sh"
+    chmod +x "${helper_remote_dir}/${SWITCH_KERNEL_NAME}.sh"
+
+    echo
+    read -p "Would you like to force-update dual-boot helper files? (Y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]] || [ -z "$REPLY" ]; then
+        # SCP runs as a normal user and cannot write directly to /usr/local/bin or /etc/
+        # We must copy to a /tmp/ folder first, then use SSH with sudo to move them!
+        ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "mkdir -p /tmp/helper_remote"
+        ${SCP_CMD} -r "${helper_remote_dir}/"* "${SSH_USER}@${SSH_HOST}:/tmp/helper_remote/"
+        
+        ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
+            sudo mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.sh ${PIN_USB_IRQ_REMOTE_PATH}
+            sudo mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.service /etc/systemd/system/
+            sudo mv -f /tmp/helper_remote/${SWITCH_KERNEL_NAME}.sh ${SWITCH_KERNEL_REMOTE_PATH}
+            sudo systemctl daemon-reload
+            rm -rf /tmp/helper_remote
+        "
+        
+        echo "✓ Helper files updated in paths:"
+        echo "  ${PIN_USB_IRQ_REMOTE_PATH}"
+        echo "  /etc/systemd/system/${PIN_USB_IRQ_NAME}.service"
+        echo "  ${SWITCH_KERNEL_REMOTE_PATH}"
+
+        echo "=============================================================================="
+        echo "Dual-Boot configured Successful!"
+        echo "Selec the new kernel with ${SWITCH_KERNEL_NAME} option."
+        echo "   bash install.sh ${SWITCH_KERNEL_NAME}"
+        echo "Reboot the Raspberry Pi (sudo reboot) and run 'uname -r' to verify."
+        echo "=============================================================================="
+    else
+        echo "=============================================================================="
+        echo "Dual-Boot left unchanged!"
+        echo "=============================================================================="
+    fi
 }
 
 # ==============================================================================
 # 3. MAIN LOGIC
 # ==============================================================================
 main() {
+    COMMAND="${1:-kernel}"
+
     environment_var
-    deploy_kernel
+
+    case "${COMMAND}" in
+        kernel)
+            deploy_kernel
+            ;;
+        dual-boot-helpers)
+            dual_boot_helpers
+            ;;
+        switch-kernel)
+            echo
+            read -p "To what kernel the switch is desired? (d/b/r) " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[d]$ ]]; then
+                echo "-> Activating default kernel..."
+                ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S ${SWITCH_KERNEL_NAME}.sh default"
+            elif [[ $REPLY =~ ^[b]$ ]]; then
+                echo "-> Activating baseline kernel..."
+                ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S ${SWITCH_KERNEL_NAME}.sh ${KERNEL_VERSION_MAJOR_MINOR}.${KERNEL_VERSION_PATCH}-baseline"
+            elif [[ $REPLY =~ ^[r]$ ]]; then
+                echo "-> Activating rt kernel..."
+                ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S ${SWITCH_KERNEL_NAME}.sh ${KERNEL_VERSION_MAJOR_MINOR}.${KERNEL_VERSION_PATCH}-rt"
+            else
+                echo "Unknown command $REPLY."
+                echo "Ending script..."
+            fi
+            ;;
+        *)
+            echo "Usage: $0 [kernel|dual-boot]"
+            echo "  kernel            - Install/copy build kernel modules, dtb and img to remote target."
+            echo "  dual-boot-helpers - Checks if dual-boot is configured. If it is missing it will be set up."
+            echo "  ${SWITCH_KERNEL_NAME}     - Switch to desire kernel. A pop up will aper requesting an input [d|b|r]."
+            exit 1
+            ;;
+    esac
 }
 
 main "$@"

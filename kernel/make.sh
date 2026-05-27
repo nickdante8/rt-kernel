@@ -76,12 +76,30 @@ package_artifacts() {
     echo "-> Staging dtbs and overlays..."
     # RPi dtbs are specifically in the broadcom/ folder for arm64
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/broadcom/"*.dtb "${DIST_DIR}/boot/" || true
+    
+    # Rename the specific target device tree if required by the bootloader
+    if [ -n "${SOURCE_DTB_NAME}" ] && [ -n "${TARGET_DTB_NAME}" ]; then
+        if [ -f "${DIST_DIR}/boot/${SOURCE_DTB_NAME}" ]; then
+            mv "${DIST_DIR}/boot/${SOURCE_DTB_NAME}" "${DIST_DIR}/boot/${TARGET_DTB_NAME}"
+            echo "   Renamed ${SOURCE_DTB_NAME} to ${TARGET_DTB_NAME} for firmware compatibility."
+        fi
+    fi
+
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/overlays/"*.dtb* "${DIST_DIR}/boot/overlays/" || true
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/overlays/README" "${DIST_DIR}/boot/overlays/" || true
 
     # 3. Install Kernel Modules into the staging area
     echo "-> Staging loadable kernel modules..."
     make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" INSTALL_MOD_PATH="${DIST_DIR}/modules" modules_install
+
+    # 4. Remove dangling symlinks
+    # The modules_install step creates 'build' and 'source' symlinks pointing 
+    # to your local host's kernel source tree. We MUST remove these.
+    # Otherwise, SCP will follow the symlink and try to copy the entire 
+    # multi-gigabyte Linux kernel source code to the Raspberry Pi's /tmp/ folder!
+    echo "-> Cleaning up local symlinks to prevent SCP failure..."
+    rm -f "${DIST_DIR}"/modules/lib/modules/*/build
+    rm -f "${DIST_DIR}"/modules/lib/modules/*/source
 
     echo "=============================================================================="
     echo "Artifacts successfully packaged!"

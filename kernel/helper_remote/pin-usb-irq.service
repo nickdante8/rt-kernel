@@ -1,0 +1,11 @@
+[Unit]
+Description=Pin USB/Ethernet IRQ to Core 2
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pin-usb-irq.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
