@@ -3,7 +3,7 @@ Logic.AppImage
 
 # Folders
 local-rtk/test_results
-linux
+linux*
 dist
 
 # Files
