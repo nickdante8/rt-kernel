@@ -95,9 +95,41 @@ package_artifacts() {
 # 3. MAIN LOGIC
 # ==============================================================================
 main() {
+    COMMAND="${1:-make}"
+
     environment_var
-    build_kernel
-    package_artifacts
+
+    case "${COMMAND}" in
+        build|make)
+            build_kernel
+            package_artifacts
+            ;;
+        clean)
+            echo "=============================================================================="
+            echo "Cleaning Kernel Build..."
+            echo "=============================================================================="
+            make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" clean
+            DIST_DIR="${SCRIPT_DIR}/dist/${BUILD_DIR_NAME}"
+            rm -rf "${DIST_DIR}"
+            echo "✓ Cleaned build directory and removed ${DIST_DIR}"
+            ;;
+        distclean)
+            echo "=============================================================================="
+            echo "Deep Cleaning Kernel Build (mrproper)..."
+            echo "=============================================================================="
+            make -C "${BUILD_DIR_PATH}" ARCH="${ARCH}" CROSS_COMPILE="${CROSS_COMPILE}" mrproper
+            DIST_DIR="${SCRIPT_DIR}/dist/${BUILD_DIR_NAME}"
+            rm -rf "${DIST_DIR}"
+            echo "✓ Deep cleaned build directory (Note: This deletes .config!)"
+            ;;
+        *)
+            echo "Usage: $0 [make|build|clean|distclean]"
+            echo "  make|build - Compiles the kernel and packages it (Default)"
+            echo "  clean      - Cleans the build environment but keeps .config"
+            echo "  distclean  - Deep cleans the environment (Deletes .config!)"
+            exit 1
+            ;;
+    esac
 }
 
 main "$@"
