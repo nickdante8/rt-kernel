@@ -11,6 +11,8 @@ service-env-var
 .setup_file_current
 *.png
 patch*
+*.html
+config*
 
 # Bash specific
 
