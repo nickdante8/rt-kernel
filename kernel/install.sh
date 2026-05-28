@@ -158,17 +158,49 @@ dual_boot_helpers() {
     # Generate the IRQ Pinning script
     cat << 'EOF' > "${helper_remote_dir}/${PIN_USB_IRQ_NAME}.sh"
 #!/bin/bash
-# Find the IRQ for the USB/Ethernet controller (dwc2 or dwc_otg)
+# ==============================================================================
+# IRQ Offloading & Network Steering Helper
+# ==============================================================================
+
+# 1. Configure Receive Packet Steering (RPS) to offload network stack processing to CPU1
+RPS_PATH="/sys/class/net/eth0/queues/rx-0/rps_cpus"
+if [ -f "$RPS_PATH" ]; then
+    # 2 is the hex bitmask for CPU1 (0b0010)
+    if echo 2 2>/dev/null > "$RPS_PATH"; then
+        echo "Successfully configured RPS for eth0 to CPU1"
+    else
+        echo "WARNING: Failed to configure RPS for eth0"
+    fi
+else
+    echo "Notice: eth0 RPS queue not found"
+fi
+
+# 2. Set USB/Ethernet hardware IRQ affinity to CPU0/CPU1 (mask 3 = CPU0 & CPU1)
 IRQ=$(grep -E 'dwc2|dwc_otg' /proc/interrupts | awk '{print $1}' | tr -d ':')
 if [ -n "$IRQ" ]; then
-    # 4 is the hex bitmask for Core 2 (0b0100)
-    if echo 4 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
-        echo "Pinned USB/Eth IRQ $IRQ to Core 2"
+    # 3 is the hex bitmask for CPU0 & CPU1 (0b0011)
+    if echo 3 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
+        echo "Set USB/Eth IRQ $IRQ smp_affinity to CPU0/CPU1 (mask 3)"
     else
         echo "WARNING: Failed to set smp_affinity for USB/Eth IRQ $IRQ (this is a hardware limitation on BCM2837/dwc2)"
     fi
 else
     echo "Could not find dwc2/dwc_otg IRQ"
+fi
+
+# 3. Pin all threaded IRQ threads to CPU1 (CPU index 1)
+# These threads exist on RT kernels (or baseline booted with threadirqs)
+PINNED_COUNT=0
+for pid in $(pgrep -f 'irq/[0-9]+-'); do
+    if taskset -cp 1 "$pid" >/dev/null 2>&1; then
+        PINNED_COUNT=$((PINNED_COUNT + 1))
+    fi
+done
+
+if [ "$PINNED_COUNT" -gt 0 ]; then
+    echo "Successfully pinned $PINNED_COUNT threaded IRQ workers to CPU1"
+else
+    echo "Notice: No threaded IRQ workers found to pin (running standard baseline kernel?)"
 fi
 EOF
 
@@ -176,7 +208,7 @@ EOF
     # Note: Using unquoted EOF to expand local bash variables during file creation
     cat << EOF > "${helper_remote_dir}/${PIN_USB_IRQ_NAME}.service"
 [Unit]
-Description=Pin USB/Ethernet IRQ to Core 2
+Description=IRQ Offloading & Network Steering Helper
 After=network.target
 
 [Service]
@@ -216,13 +248,13 @@ else
     
     echo "os_prefix=\$1/" >> ${REMOTE_BOOT_DIR}/config.txt
     
-    # Automatically enable IRQ pinning if the prefix implies an RT kernel
-    if [[ "\$1" == *"-rt"* ]]; then
+    # Automatically enable IRQ offloading if the target kernel's cmdline.txt contains isolcpus or irqaffinity
+    if grep -qE "isolcpus|irqaffinity" "\${PREFIX_DIR}/cmdline.txt" 2>/dev/null; then
         systemctl enable ${PIN_USB_IRQ_NAME}.service
-        echo "Switched to RT kernel (\$1). IRQ Pinning ENABLED. Reboot to apply."
+        echo "Switched to kernel (\$1). Isolation detected -> IRQ Pinning & RPS ENABLED. Reboot to apply."
     else
         systemctl disable ${PIN_USB_IRQ_NAME}.service
-        echo "Switched to Baseline kernel (\$1). IRQ Pinning DISABLED. Reboot to apply."
+        echo "Switched to kernel (\$1). No isolation -> IRQ Pinning & RPS DISABLED. Reboot to apply."
     fi
 fi
 EOF

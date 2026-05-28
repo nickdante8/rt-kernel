@@ -1,5 +1,5 @@
 [Unit]
-Description=Pin USB/Ethernet IRQ to Core 2
+Description=IRQ Offloading & Network Steering Helper
 After=network.target
 
 [Service]

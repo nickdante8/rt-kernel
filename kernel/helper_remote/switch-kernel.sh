@@ -22,12 +22,12 @@ else
     
     echo "os_prefix=$1/" >> /boot/firmware/config.txt
     
-    # Automatically enable IRQ pinning if the prefix implies an RT kernel
-    if [[ "$1" == *"-rt"* ]]; then
+    # Automatically enable IRQ offloading if the target kernel's cmdline.txt contains isolcpus or irqaffinity
+    if grep -qE "isolcpus|irqaffinity" "${PREFIX_DIR}/cmdline.txt" 2>/dev/null; then
         systemctl enable pin-usb-irq.service
-        echo "Switched to RT kernel ($1). IRQ Pinning ENABLED. Reboot to apply."
+        echo "Switched to kernel ($1). Isolation detected -> IRQ Pinning & RPS ENABLED. Reboot to apply."
     else
         systemctl disable pin-usb-irq.service
-        echo "Switched to Baseline kernel ($1). IRQ Pinning DISABLED. Reboot to apply."
+        echo "Switched to kernel ($1). No isolation -> IRQ Pinning & RPS DISABLED. Reboot to apply."
     fi
 fi
