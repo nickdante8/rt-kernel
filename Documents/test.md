@@ -1,0 +1,63 @@
+```mermaid
+sequenceDiagram
+    loop each requested --load-type
+        local-rtk->>+remote-rtk: Run test_start.sh with a set of arguments<br>(--test-type, --load-type, --date-init, --duration-s, --nominal-period-us
+        Note right of remote-rtk: Create env file '.setup_file_current'<br>with received arguments
+        Note right of remote-rtk: Start test-exec.service with all<br>environment variables from '.setup_file_current'.<br>It shall run with a 2xMT margin longer.
+        Note right of remote-rtk: Start led-toggle.service with<br>--nominal-period-us, --duration-s, --output<br><br>It must log timestamps of first and last edges<br>of the periods to RAM. Then to file.<br><br>It shall start running after a delay of MT margin.
+        remote-rtk-->>-local-rtk: Success/Fail status of creating file and starting services
+        Note left of local-rtk: Python script starts saelae measurement<br>on set --duration-s
+        Note left of local-rtk: This execution is blocking mode.<br>It stays in the script until it is done measuring.
+        Note right of remote-rtk: It executes the led-toggle and logging<br>of measurements independently of local-rtk<br>(--duration-s + margin <2xMT>)
+        Note over local-rtk: Wait a designated margin
+        Note left of local-rtk: Measurement done and stopped for saleae
+        Note right of remote-rtk: led-toggle and test-exec finished (idealy)
+        loop (finished reponse not receved || timeout not reached)
+            local-rtk->>+remote-rtk: Run test_state.sh to get test result
+            Note right of remote-rtk: Service status of led-toggle.service
+            Note right of remote-rtk: Service status of test-exec.service
+            remote-rtk-->>-local-rtk: Send a response (finished/failed/running)
+        end
+        local-rtk->>+remote-rtk: scp files with all necessary logs
+        remote-rtk-->>-local-rtk: return requested scp files
+    end
+```
+
+```mermaid
+gantt
+    title Measurement synchronization timings 
+    %% This is a comment
+    axisFormat %M-%S-%L
+    dateFormat mm-ss-SSS
+    %% mtx - stands for margine time,
+    %%       where x is an iterator
+    %% ry_mtx - remote margine time
+    %% ly_mtx - local margine time
+    section remote
+        %% Test execution script
+        TE1 :rte1, 00-00-000, 10s
+        MT  :rte_mt1, after rte1, 1s
+        MT  :rte_mt2, after rte_mt1, 1s
+        %% Commands running in test execution script
+        CTE1:rcte1, 00-00-200, 10s
+        MT  :rcte_mt1, after rcte1, 1s
+        MT  :rcte_mt2, after rcte_mt1, 0.5s
+        %% PIN toggle service
+        MT  :rlt_mt1, 00-00-100, 1s
+        LT1 :rlt1, after rlt_mt1, 10s
+    section local
+        M1  :lm1, 00-00-500, 10s
+        MT  :lm_mt1, after lm1, 1s
+        MT  :lm_mt2, after lm_mt1, 1s
+    S1    : vert, vs1, 00-00-500, 1s
+    S2    : vert, vs2, after lm_mt2, 1s
+    A1  : vert, v1, after rlt_mt1, 1s
+    A2    : vert, v2, after rlt1, 1s
+```
+
+| Setup | Jitter (Cycle-to-Cycle variation) | Drift (Long-term phase shift) | Why? |
+| -------- | ------- | ------- | ------- |
+| Baseline + usleep | SEVERE | SEVERE | Network softirqs delay the usleep wake-up. The delay stacks cumulatively every cycle. |
+| Baseline + ABSTIME | SEVERE | NONE | "Softirqs still delay the wake-up, causing edge jitter. But the absolute timer forces the next cycle to shorten, preventing long-term drift." |
+| PREEMPT_RT + usleep | LOW | MODERATE | "The RT kernel preempts the network traffic, so the wake-up is fast. But the 1μs C-code execution time still stacks every cycle, causing slow drift." |
+| PREEMPT_RT + ABSTIME | LOW | NONE | "The Holy Grail. RT Kernel guarantees fast wake-up, and absolute timers guarantee perfect synchronization with the Saleae over infinite time." |

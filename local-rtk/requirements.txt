@@ -1,0 +1,4 @@
+logic2-automation
+pandas
+matplotlib
+ipykernel
