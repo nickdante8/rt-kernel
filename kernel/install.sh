@@ -116,7 +116,9 @@ deploy_kernel() {
     echo "Before reboot make sure that the dual-boot and the right kernel is selected."
     echo "After the Raspberry Pi (sudo reboot), run 'uname -r' to verify active kernel."
     echo "=============================================================================="
+}
 
+kernel_boot_update() {
     # Ensure dual-boot config and boot parameters are set up
     echo "-> Configuring Boot parameters..."
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
@@ -124,9 +126,18 @@ deploy_kernel() {
         BASE_CMDLINE=\$(cat ${REMOTE_BOOT_DIR}/cmdline.txt | sed -e 's/isolcpus=[^ ]*//g' -e 's/rcu_nocbs=[^ ]*//g' -e 's/nohz_full=[^ ]*//g' -e 's/irqaffinity=[^ ]*//g' -e 's/dwc_otg.fiq_enable=0//g' -e 's/dwc_otg.fiq_fsm_enable=0//g' | xargs)
         
         # Create the appropriate cmdline.txt inside the os_prefix folder
+        BOOT_FLAGS=\"\"
+        if [ \"${ENABLE_ISOLATION}\" = \"true\" ]; then
+            BOOT_FLAGS=\"isolcpus=2,3 rcu_nocbs=2,3 nohz_full=2,3 irqaffinity=0,1\"
+        fi
+        
+        # Append downstream-specific RT overrides if running RT on downstream
         if [ \"${ENABLE_RT}\" = \"true\" ]; then
-            RT_FLAGS=\"isolcpus=2,3 rcu_nocbs=2,3 nohz_full=2,3 irqaffinity=0,1 dwc_otg.fiq_enable=0 dwc_otg.fiq_fsm_enable=0\"
-            echo \"\$BASE_CMDLINE \$RT_FLAGS\" > /tmp/cmdline.txt
+            BOOT_FLAGS=\"\$BOOT_FLAGS dwc_otg.fiq_enable=0 dwc_otg.fiq_fsm_enable=0\"
+        fi
+        
+        if [ -n \"\$BOOT_FLAGS\" ]; then
+            echo \"\$BASE_CMDLINE \$BOOT_FLAGS\" > /tmp/cmdline.txt
         else
             echo \"\$BASE_CMDLINE\" > /tmp/cmdline.txt
         fi
@@ -151,8 +162,11 @@ dual_boot_helpers() {
 IRQ=$(grep -E 'dwc2|dwc_otg' /proc/interrupts | awk '{print $1}' | tr -d ':')
 if [ -n "$IRQ" ]; then
     # 4 is the hex bitmask for Core 2 (0b0100)
-    echo 4 > /proc/irq/$IRQ/smp_affinity
-    echo "Pinned USB/Eth IRQ $IRQ to Core 2"
+    if echo 4 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
+        echo "Pinned USB/Eth IRQ $IRQ to Core 2"
+    else
+        echo "WARNING: Failed to set smp_affinity for USB/Eth IRQ $IRQ (this is a hardware limitation on BCM2837/dwc2)"
+    fi
 else
     echo "Could not find dwc2/dwc_otg IRQ"
 fi
@@ -227,10 +241,10 @@ EOF
         ${SCP_CMD} -r "${helper_remote_dir}/"* "${SSH_USER}@${SSH_HOST}:/tmp/helper_remote/"
         
         ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
-            sudo mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.sh ${PIN_USB_IRQ_REMOTE_PATH}
-            sudo mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.service /etc/systemd/system/
-            sudo mv -f /tmp/helper_remote/${SWITCH_KERNEL_NAME}.sh ${SWITCH_KERNEL_REMOTE_PATH}
-            sudo systemctl daemon-reload
+            echo '$(cat .sshpass)' | sudo -S mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.sh ${PIN_USB_IRQ_REMOTE_PATH}
+            echo '$(cat .sshpass)' | sudo -S mv -f /tmp/helper_remote/${PIN_USB_IRQ_NAME}.service /etc/systemd/system/
+            echo '$(cat .sshpass)' | sudo -S mv -f /tmp/helper_remote/${SWITCH_KERNEL_NAME}.sh ${SWITCH_KERNEL_REMOTE_PATH}
+            echo '$(cat .sshpass)' | sudo -S systemctl daemon-reload
             rm -rf /tmp/helper_remote
         "
         
@@ -256,13 +270,17 @@ EOF
 # 3. MAIN LOGIC
 # ==============================================================================
 main() {
-    COMMAND="${1:-kernel}"
+    COMMAND="${1:-kernel-deploy}"
 
     environment_var
 
     case "${COMMAND}" in
-        kernel)
+        kernel-deploy)
             deploy_kernel
+            kernel_boot_update
+            ;;
+        kernel-boot-update)
+            kernel_boot_update
             ;;
         dual-boot-helpers)
             dual_boot_helpers
@@ -286,10 +304,11 @@ main() {
             fi
             ;;
         *)
-            echo "Usage: $0 [kernel|dual-boot]"
-            echo "  kernel            - Install/copy build kernel modules, dtb and img to remote target."
-            echo "  dual-boot-helpers - Checks if dual-boot is configured. If it is missing it will be set up."
-            echo "  ${SWITCH_KERNEL_NAME}     - Switch to desire kernel. A pop up will aper requesting an input [d|b|r]."
+            echo "Usage: $0 [kernel-deploy|kernel-boot-update|dual-boot-helpers|switch-kernel]"
+            echo "  kernel-deploy      - Install/copy build kernel modules, dtb and img to remote target and update boot parameters."
+            echo "  kernel-boot-update - Update boot parameters (cmdline.txt) on remote target based on configuration."
+            echo "  dual-boot-helpers  - Checks if dual-boot is configured. If it is missing it will be set up."
+            echo "  ${SWITCH_KERNEL_NAME}      - Switch to desired kernel. A pop up will appear requesting an input [d|b|r]."
             exit 1
             ;;
     esac
