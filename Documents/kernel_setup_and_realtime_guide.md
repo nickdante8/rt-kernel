@@ -132,32 +132,87 @@ Real-time latency constraints require turning off legacy Raspberry Pi hardware e
 
 ---
 
-## 5. USB/Ethernet IRQ Pinning
+## 5. IRQ Offloading & Network Steering Helper
 
-While `irqaffinity=0,1` relocates standard interrupts, the primary USB controller interrupt (`dwc_otg` or `dwc2`) can still bleed onto other cores. To enforce strict determinism when the RT kernel is running, a dedicated script `/usr/local/bin/pin-usb-irq.sh` pins this interrupt.
+While `irqaffinity=0,1` in `cmdline.txt` suggests to the kernel to relocate standard interrupts, it does not completely prevent network packets, hardware interrupts, or driver workers from running on isolated Cores 2 and 3. To enforce strict determinism, the system installs an offloading daemon `/usr/local/bin/pin-usb-irq.sh` on the Pi.
 
-Because some kernel architectures or hardware revisions on BCM2837/dwc2 do not support redirecting the USB interrupt from Core 0, the script includes logic to detect when the operation is rejected and log a warning instead of failing:
+This script performs three distinct levels of offloading to shield Cores 2 and 3 from interrupt and network overhead:
+
+### 1. Software Network Stack Offloading (Receive Packet Steering - RPS)
+When network packets arrive, they generate hardware interrupts, which are followed by software interrupt processing (softirqs) to run the TCP/IP stack. 
+* The script writes mask `2` (binary `0010` -> CPU1) to `/sys/class/net/eth0/queues/rx-0/rps_cpus`.
+* This forces all software-level network stack packet processing (RPS) to run exclusively on CPU1, shielding both CPU0 and the isolated Cores 2/3.
+
+### 2. Hardware USB/Ethernet Interrupt Routing
+* The script finds the active hardware IRQ number for the USB controller (`dwc_otg` or `dwc2`).
+* It writes mask `3` (binary `0011` -> CPU0 & CPU1) to `/proc/irq/<IRQ>/smp_affinity`.
+* This restricts the hardware USB/Ethernet interrupts from executing on Cores 2 and 3, keeping them strictly on the non-isolated CPU0 and CPU1.
+* *Note:* Because some kernel configurations or hardware versions of the BCM2837/dwc2 do not support redirecting the USB hardware interrupt away from Core 0, the script catches write errors (`2>/dev/null`) and logs a warning instead of failing the startup.
+
+### 3. Threaded IRQ Workers Pinning
+On a `PREEMPT_RT` kernel (or baseline booted with the `threadirqs` command-line option), the kernel runs hardware interrupt handlers inside dedicated kernel threads (named `irq/[IRQ]-...`). 
+* The script searches for these threads using `pgrep -f 'irq/[0-9]+-'`.
+* It uses `taskset -cp 1` to pin them to CPU1 (Core index 1).
+* This prevents interrupt handling threads from migrating to or executing on the isolated Cores 2 and 3.
 
 ```bash
 #!/bin/bash
-# Find the active IRQ number of the USB controller
+# ==============================================================================
+# IRQ Offloading & Network Steering Helper
+# ==============================================================================
+
+# 1. Configure Receive Packet Steering (RPS) to offload network stack processing to CPU1
+RPS_PATH="/sys/class/net/eth0/queues/rx-0/rps_cpus"
+if [ -f "$RPS_PATH" ]; then
+    # 2 is the hex bitmask for CPU1 (0b0010)
+    if echo 2 2>/dev/null > "$RPS_PATH"; then
+        echo "Successfully configured RPS for eth0 to CPU1"
+    else
+        echo "WARNING: Failed to configure RPS for eth0"
+    fi
+else
+    echo "Notice: eth0 RPS queue not found"
+fi
+
+# 2. Set USB/Ethernet hardware IRQ affinity to CPU0/CPU1 (mask 3 = CPU0 & CPU1)
 IRQ=$(grep -E 'dwc2|dwc_otg' /proc/interrupts | awk '{print $1}' | tr -d ':')
 if [ -n "$IRQ" ]; then
-    # Write mask 4 (binary 0100 -> Core 2) to the interrupt affinity file
-    if echo 4 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
-        echo "Pinned USB/Eth IRQ $IRQ to Core 2"
+    # 3 is the hex bitmask for CPU0 & CPU1 (0b0011)
+    if echo 3 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
+        echo "Set USB/Eth IRQ $IRQ smp_affinity to CPU0/CPU1 (mask 3)"
     else
         echo "WARNING: Failed to set smp_affinity for USB/Eth IRQ $IRQ (this is a hardware limitation on BCM2837/dwc2)"
     fi
 else
     echo "Could not find dwc2/dwc_otg IRQ"
 fi
+
+# 3. Pin all threaded IRQ threads to CPU1 (CPU index 1)
+PINNED_COUNT=0
+for pid in $(pgrep -f 'irq/[0-9]+-'); do
+    if taskset -cp 1 "$pid" >/dev/null 2>&1; then
+        PINNED_COUNT=$((PINNED_COUNT + 1))
+    fi
+done
+
+if [ "$PINNED_COUNT" -gt 0 ]; then
+    echo "Successfully pinned $PINNED_COUNT threaded IRQ workers to CPU1"
+else
+    echo "Notice: No threaded IRQ workers found to pin (running standard baseline kernel?)"
+fi
 ```
 
-### Automation Service
-A systemd unit file `/etc/systemd/system/pin-usb-irq.service` executes this pinning routine automatically on boot:
-* It is automatically **enabled** by the `switch-kernel` utility when switching to the **RT kernel**.
-* It is automatically **disabled** when switching to the **Baseline** or **Default** kernels.
+### Automation & Decoupled Activation
+A systemd unit file `/etc/systemd/system/pin-usb-irq.service` executes this routine on boot. 
+
+The activation of this helper service is **completely decoupled from the kernel type**:
+* The `switch-kernel.sh` script scans the target kernel's `cmdline.txt` for `isolcpus` or `irqaffinity`.
+* If isolation flags are found (meaning `ENABLE_ISOLATION=true` was set when generating that kernel's boot parameter list), the IRQ Offloading service is automatically **enabled**.
+* If no isolation flags are present (meaning `ENABLE_ISOLATION=false` was set), the service is automatically **disabled**.
+
+This decoupling allows you to test:
+1. **RT kernels with or without core isolation** (evaluating raw PREEMPT_RT capabilities versus core shielding).
+2. **Baseline kernels with or without core isolation** (evaluating if core shielding alone can improve GPOS latency bounds).
 
 ---
 
