@@ -203,11 +203,6 @@ config_kernel() {
     fi
 
     # Subsystem/Driver Stripping
-    if [ "${STRIP_SOUND}" = "true" ]; then
-        echo "-> Stripping Sound support..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable SOUND
-    fi
-
     if [ "${STRIP_WIFI}" = "true" ]; then
         echo "-> Stripping Wi-Fi drivers and stack..."
         "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CFG80211
@@ -219,7 +214,9 @@ config_kernel() {
         "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BT
     fi
 
-    if [ "${STRIP_VIDEO}" = "true" ]; then
+    if [ "${STRIP_SOUND_VIDEO}" = "true" ]; then
+        echo "-> Stripping Sound support..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable SOUND
         echo "-> Stripping DRM/Video drivers..."
         "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable DRM
     fi
