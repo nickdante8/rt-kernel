@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
-from models import SaleaeSignalMetrics, SaleaeCrossMetrics
+from models import ExperimentConfig, SaleaeSignalMetrics, SaleaeCrossMetrics
 
-def timing_analysis(obj, df, time_col, channel_col):
+def timing_analysis(obj: ExperimentConfig, df, time_col, channel_col):
     """
     Calculates Jitter, Drift, Latency, and Phase based on a nominal period.
     """
@@ -11,10 +11,10 @@ def timing_analysis(obj, df, time_col, channel_col):
     # Using .fillna to ensure we don't miss an edge on row 0 if signal starts High
     prev_val = df[channel_col].shift(1).fillna(df[channel_col].iloc[0])
     
-    # Detect Edges (1 -> 0 transition) - falling
     # Detect Edges (0 -> 1 transition) - rising
-    falling_dt = df[(df[channel_col] == 0) & (prev_val == 1)][time_col].values
+    # Detect Edges (1 -> 0 transition) - falling
     rising_dt = df[(df[channel_col] == 1) & (prev_val == 0)][time_col].values
+    falling_dt = df[(df[channel_col] == 0) & (prev_val == 1)][time_col].values
 
     # -------- NORMAL TIMING CONVERSION --------
     # Doesn't use iso8601_timestamp for time capture
@@ -30,21 +30,26 @@ def timing_analysis(obj, df, time_col, channel_col):
     # Usage of iso8601_timestamp
     # --------------------------------------------
     # Establish T0 (the first timestamp in the dataset) to keep X-axis relative to the front
-    t0 = pd.to_datetime(falling_dt[0]).tz_localize(None)
+    t0 = pd.to_datetime(rising_dt[0]).tz_localize(None)
 
     # Convert edge timestamps to datetime objects, strip timezone
-    falling_pts = pd.to_datetime(falling_dt).tz_localize(None)
     rising_pts = pd.to_datetime(rising_dt).tz_localize(None)
+    falling_pts = pd.to_datetime(falling_dt).tz_localize(None)
 
     # Subtract T0, convert the delta to total nanoseconds (float64)
-    falling_us = np.round((falling_pts - t0).total_seconds().values * 1_000_000).astype(np.float64)
     rising_us = np.round((rising_pts - t0).total_seconds().values * 1_000_000).astype(np.float64)
+    falling_us = np.round((falling_pts - t0).total_seconds().values * 1_000_000).astype(np.float64)
     # --------------------------------------------
 
     # Ensure alignment: Start with Falling, End with Rising
-    if len(falling_us) > 0 and len(rising_us) > 0 and falling_us[0] > rising_us[0]: 
-        rising_us = rising_us[1:]
-        
+    if len(falling_us) > 0 and len(rising_us) > 0 and rising_us[0] > falling_us[0]: 
+        falling_us = falling_us[1:]
+
+    # Elimine the small noise from turning off the HW channel
+    if 'Channel 1' in channel_col:
+        falling_us = falling_us[:-1]
+        rising_us = rising_us[:-1]
+
     min_len = min(len(rising_us), len(falling_us))
     if min_len < 2:
         return {'error': "Not enough pulses detected for analysis"}
@@ -55,14 +60,8 @@ def timing_analysis(obj, df, time_col, channel_col):
         return {'error': f"Expected {expected_edges}, got {min_len}."}
     
     # Construct data
-    falling_us = falling_us[:min_len]
     rising_us = rising_us[:min_len]
-
-    # Falling Edge Metrics (N-1 samples)
-    periods_fall = np.diff(falling_us)
-    time_jitter_fall = falling_us[1:]
-    jitter_fall = (periods_fall - obj.nominal_period_us)
-    drift_fall = np.cumsum(jitter_fall)
+    falling_us = falling_us[:min_len]
 
     # Rising Edge Metrics (N-1 samples)
     # Time axis for jitter is the time of the edge that "arrived" (rising_us[1:])
@@ -71,10 +70,16 @@ def timing_analysis(obj, df, time_col, channel_col):
     jitter_rise = (periods_rise - obj.nominal_period_us)
     drift_rise = np.cumsum(jitter_rise)
 
+    # Falling Edge Metrics (N-1 samples)
+    periods_fall = np.diff(falling_us)
+    time_jitter_fall = falling_us[1:]
+    jitter_fall = (periods_fall - obj.nominal_period_us)
+    drift_fall = np.cumsum(jitter_fall)
+
     # Pulse Metrics (N samples)
     # Time axis is the start of each pulse
-    time_pulse = falling_us 
-    pulse_widths = rising_us - falling_us
+    time_pulse = rising_us 
+    pulse_widths = falling_us - rising_us
     duty_cycles = (pulse_widths.astype(float) / obj.nominal_period_us) * 100
 
     return SaleaeSignalMetrics(
