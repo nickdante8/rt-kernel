@@ -9,7 +9,9 @@
 #include <time.h>
 #include <getopt.h>
 #include <sys/stat.h>
-#include <pigpio.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <gpiod.h>
 
 /* Global redefines */
 #define STD_FALSE   ((uint8_t)0U)
@@ -29,7 +31,6 @@ typedef struct led_options {
     uint32_t u32_period_us;
     uint32_t u32_semi_period_us;
     uint32_t u32_freq;
-    uint32_t u32_duty;
     uint32_t u32_duration_s;
     bool b_relative_sleep;
 } led_options_t;
@@ -67,18 +68,85 @@ void signalHandler(int signum) {
     keepRunning = 0;
 }
 
-/* Stoping hardware PWM */
-void stop_hardware_pwm(int pin) {
-    /* Force the pin back to a standard Output mode */
-    gpioSetMode(pin, PI_OUTPUT);
-    
-    /* Explicitly write high to be safe */
-    gpioWrite(pin, 1);
+/* Robust PWM Sysfs writer helper */
+bool pwm_write_sysfs(const char *path, const char *value) {
+    int fd = open(path, O_WRONLY);
+    bool write_status = true;
 
-    /* Set frequency and duty cycle to 0 */
-    gpioHardwarePWM(pin, 0, 0); 
-    
-    syslog(LOG_INFO, "Hardware PWM on pin %d fully disabled.", pin);
+    if (fd < 0) {
+        syslog(LOG_ERR, "PWM: Failed to open %s: %m", path);
+        write_status = false;
+    } else {
+        size_t len = strlen(value);
+        ssize_t written = write(fd, value, len);
+
+        /* Close file */
+        close(fd);
+        
+        /* Compare amount written to amount requested to write */
+        if (written != (ssize_t)len) {
+            syslog(LOG_ERR, "PWM: Failed to write '%s' to %s: %m", value, path);
+            write_status = false;
+        }
+    }
+    return write_status;
+}
+
+/* Initialize hardware PWM using a safe sequence to prevent glitches and -EINVAL errors */
+bool pwm_init(uint32_t period_ns, uint32_t duty_ns) {
+    struct stat st;
+    bool init_status = true;
+
+    /* Export pwm0 if not already exported */
+    if (stat("/sys/class/pwm/pwmchip0/pwm0", &st) != 0) {
+        int fd = open("/sys/class/pwm/pwmchip0/export", O_WRONLY);
+        if (fd >= 0) {
+            write(fd, "0\n", 2);
+            close(fd);
+            usleep(200000); // Wait for udev to create nodes
+        }
+    }
+
+    /* Check status of the file after exporting */
+    if (stat("/sys/class/pwm/pwmchip0/pwm0", &st) != 0) {
+        syslog(LOG_ERR, "PWM: Failed to export pwm0");
+        init_status = false;
+    } else {
+        /* Disable PWM */
+        pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/enable", "0\n");
+
+        /* Set duty cycle to 0 first (prevents EINVAL when period changes) */
+        pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/duty_cycle", "0\n");
+
+        /* Set period */
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%u\n", period_ns);
+        if (!pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/period", buf)) {
+            init_status = false;
+        } else {
+            /* Set target duty cycle */
+            snprintf(buf, sizeof(buf), "%u\n", duty_ns);
+            if (!pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/duty_cycle", buf)) {
+                init_status = false;
+            } else {
+                /* Enable PWM */
+                if (!pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/enable", "1\n")) {
+                    init_status = false;
+                } else {
+                    syslog(LOG_INFO, "PWM: Initialized with period=%u ns, duty=%u ns", period_ns, duty_ns);
+                }
+            }
+        }
+    }
+
+    return init_status;
+}
+
+/* Disable PWM and reset duty cycle to 0 */
+void pwm_disable(void) {
+    pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/enable", "0\n");
+    pwm_write_sysfs("/sys/class/pwm/pwmchip0/pwm0/duty_cycle", "0\n");
+    syslog(LOG_INFO, "PWM: Disabled");
 }
 
 /* Helper function to get current time in seconds */
@@ -265,7 +333,8 @@ int main(int argc, char **argv) {
     struct sigaction action = { .sa_handler = signalHandler };
 
     /* Toggle specific needs */
-    int pigpio_initialized = STD_FALSE;
+    bool gpiod_initialized = false;
+    bool pwm_initialized = false;
     led_options_t led_param = {0};
     char output_path[PATH_MAX_LEN] = {0};
     /* Synchronization tracking arrays with edges timestamp */
@@ -280,9 +349,18 @@ int main(int argc, char **argv) {
     double current_time = start_time;
     double end_time = 0.0;
 
+    /* gpiod handles */
+    struct gpiod_chip *chip = NULL;
+    struct gpiod_line_settings *output_settings = NULL;
+    struct gpiod_line_settings *input_settings = NULL;
+    struct gpiod_line_config *output_line_cfg = NULL;
+    struct gpiod_line_config *input_line_cfg = NULL;
+    struct gpiod_request_config *req_cfg = NULL;
+    struct gpiod_line_request *request = NULL;
+
     /* Open a connection to the system logger */
     openlog("LedToggleService", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "GPIO Toggle Service.");
+    syslog(LOG_INFO, "GPIO Toggle Service (using libgpiod v2).");
 
     /* Catch the SIGTERM signal sent by 'systemctl stop' */
     sigaction(SIGTERM, &action, NULL);
@@ -291,24 +369,65 @@ int main(int argc, char **argv) {
     /* Parse arguments */
     exit_code = arg_parse(argc, argv, &led_param, output_path);
 
-    /* Initialize pigpio */
+    /* Initialize GPIO via libgpiod v2 */
     if (exit_code == EXIT_SUCCESS) {
-        /* This prevents pigpio from handling signals, which we do ourselves */
-        gpioCfgSetInternals(gpioCfgGetInternals() | PI_CFG_NOSIGHANDLER);
-
-        if (gpioInitialise() < 0)
-        {
-            syslog(LOG_ERR, "Failed to initialize pigpio!");
+        /* Open a chip by path*/
+        chip = gpiod_chip_open("/dev/gpiochip0");
+        if (!chip) {
+            syslog(LOG_ERR, "GPIO: Failed to open /dev/gpiochip0: %m");
             exit_code = EXIT_FAILURE;
-        }
-        else
-        {
-            pigpio_initialized = STD_TRUE;
+        } else {
+            /* Create a new line settings object */
+            output_settings = gpiod_line_settings_new();
+            if (!output_settings) {
+                syslog(LOG_ERR, "GPIO: Failed to allocate line settings");
+                exit_code = EXIT_FAILURE;
+            } else {
+                /* Set pin direction and output value */
+                gpiod_line_settings_set_direction(output_settings, GPIOD_LINE_DIRECTION_OUTPUT);
+                gpiod_line_settings_set_output_value(output_settings, GPIOD_LINE_VALUE_INACTIVE);
+
+                /* Create a new line config object */
+                output_line_cfg = gpiod_line_config_new();
+                if (!output_line_cfg) {
+                    syslog(LOG_ERR, "GPIO: Failed to allocate line config");
+                    exit_code = EXIT_FAILURE;
+                } else {
+                    unsigned int offset = SOFT_PIN;
+
+                    /* Based on line settings of the pin for the direction and output,
+                     * of the line configuration; apply it to the array of offsets,
+                     * in this case SOFT_PIN
+                     */
+                    if (gpiod_line_config_add_line_settings(output_line_cfg, &offset, 1, output_settings) < 0) {
+                        syslog(LOG_ERR, "GPIO: Failed to add line settings for pin %u: %m", offset);
+                        exit_code = EXIT_FAILURE;
+                    } else {
+                        /* Create a new request config object */
+                        req_cfg = gpiod_request_config_new();
+                        if (!req_cfg) {
+                            syslog(LOG_ERR, "GPIO: Failed to allocate request config");
+                            exit_code = EXIT_FAILURE;
+                        } else {
+                            /* Set the consumer name of the request */
+                            gpiod_request_config_set_consumer(req_cfg, "led-toggle");
+                            /* Request a set of lines for exclusive usage */
+                            request = gpiod_chip_request_lines(chip, req_cfg, output_line_cfg);
+                            if (!request) {
+                                syslog(LOG_ERR, "GPIO: Failed to request GPIO lines: %m");
+                                exit_code = EXIT_FAILURE;
+                            } else {
+                                gpiod_initialized = true;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     /* Main logic */
-    if (pigpio_initialized == STD_TRUE)
+    if (gpiod_initialized == true)
     {
         /* Calculate end time and log it. */
         end_time = start_time + (double)led_param.u32_duration_s;
@@ -318,57 +437,81 @@ int main(int argc, char **argv) {
         /* Calculate periods */
         led_param.u32_semi_period_us = (uint32_t)(led_param.u32_period_us / 2U);
         led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
-        led_param.u32_duty = PI_HW_PWM_RANGE - PI_HW_PWM_RANGE / 2U;
+        
+        /* Duty cycle for sysfs (nanoseconds) */
+        uint32_t period_ns = 1000000000U / led_param.u32_freq;
+        uint32_t duty_ns = period_ns / 2U;
 
         /* Summary running information */
         if (led_param.b_relative_sleep == true) {
-            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
-                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s, output_path, "relative");
+            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "relative");
             time_sleep_ptr = relative_sleep;
         } else {
-            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuty cycle: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
-                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duty, led_param.u32_duration_s, output_path, "absolute");
+            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "absolute");
             time_sleep_ptr = absolute_sleep;
         }
 
-        /* Hardware PWM (GPIO 18) - 1Hz, 50% duty cycle */
-        gpioHardwarePWM(HARD_PIN, led_param.u32_freq, led_param.u32_duty); 
-        syslog(LOG_INFO, "Hardware PWM initialized on GPIO 18.");
-    
-        gpioSetMode(SOFT_PIN, PI_OUTPUT);
+        /* Hardware PWM (GPIO 18) via sysfs helper */
+        if (!pwm_init(period_ns, duty_ns)) {
+            syslog(LOG_ERR, "PWM: Failed to initialize PWM.");
+            exit_code = EXIT_FAILURE;
+        } else {
+            pwm_initialized = true;
+        }
+    }
 
+    if (gpiod_initialized && pwm_initialized) {
         /* Initialize the baseline timestamp exactly ONCE before the loop */
         clock_gettime(CLOCK_MONOTONIC, &next_wakeup);
-    
+
         /* Main toggle loop */
         while ((keepRunning) && (current_time < end_time)) {
-            save_edge(&et, get_time_s(), PI_HIGH);
-            gpioWrite(SOFT_PIN, PI_HIGH);
+            save_edge(&et, get_time_s(), 1);
+            gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_ACTIVE);
             time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
     
-            save_edge(&et, get_time_s(), PI_LOW);
-            gpioWrite(SOFT_PIN, PI_LOW);
+            save_edge(&et, get_time_s(), 0);
+            gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_INACTIVE);
             time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
 
             /* Update time */
             current_time = get_time_s();
         }
 
-        /* leave pin state to high */
-        gpioWrite(SOFT_PIN, 1);
+        /* Reconfigure pin to high-impedance input on exit */
+        input_settings = gpiod_line_settings_new();
+        input_line_cfg = gpiod_line_config_new();
+        if (input_settings && input_line_cfg) {
+            gpiod_line_settings_set_direction(input_settings, GPIOD_LINE_DIRECTION_INPUT);
+            unsigned int offset = SOFT_PIN;
+            if (gpiod_line_config_add_line_settings(input_line_cfg, &offset, 1, input_settings) == 0) {
+                gpiod_line_request_reconfigure_lines(request, input_line_cfg);
+                syslog(LOG_INFO, "GPIO: Reconfigured pin %u to input (high-impedance) on exit.", SOFT_PIN);
+            }
+        }
+
+        /* Free gpiod objects */
+        if (input_settings) gpiod_line_settings_free(input_settings);
+        if (input_line_cfg) gpiod_line_config_free(input_line_cfg);
 
         /* Turn off PWM */
-        stop_hardware_pwm(HARD_PIN);
+        pwm_disable();
 
         /* Save edges timestamp */
         finalize_and_save_logs(&et, output_path);
     
-        /* Notify about shuting down the service */
+        /* Notify about shutting down the service */
         syslog(LOG_INFO, "Service shutting down.");
-        
-        /* Close the pigpio and logging */
-        gpioTerminate();
     }
+
+    /* Cleanup libgpiod resources */
+    if (request) gpiod_line_request_release(request);
+    if (req_cfg) gpiod_request_config_free(req_cfg);
+    if (output_line_cfg) gpiod_line_config_free(output_line_cfg);
+    if (output_settings) gpiod_line_settings_free(output_settings);
+    if (chip) gpiod_chip_close(chip);
 
     /* Close system logger */
     closelog();

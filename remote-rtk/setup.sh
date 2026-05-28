@@ -13,9 +13,9 @@ cd "$SCRIPT_DIR"
 
 # Required dependencies
 # install pakages true name
-INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio")
+INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio" "libgpiod-dev" "gpiod")
 # command name to check if they are available
-REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio")
+REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio" "gpiodetect" "gpiodetect")
 
 
 # ==============================================================================
@@ -117,40 +117,7 @@ check_led_toggle_dependencies() {
     chmod +x ${LED_PROJECT_LOCATION}/build.sh
 
     # Check if library is installed
-    echo "Checking for pigpio library..."
-
-    if [ -f "/usr/local/include/pigpio.h" ]; then
-        echo "pigpio is already installed (Version: $(pigpiod -v))"
-    else
-        echo "pigpio not found. Starting installation..."
-
-        # Update package list
-        sudo apt update
-        sudo apt install -y wget unzip make gcc
-
-        # Download and Build from source (Official abyz.me.uk method)
-        # Using a temporary directory to keep things clean
-        TEMP_DIR=$(mktemp -d)
-        cd "$TEMP_DIR" || exit
-
-        echo "Downloading pigpio source..."
-        wget https://github.com/joan2937/pigpio/archive/master.zip
-        unzip master.zip
-        cd pigpio-master || exit
-
-        echo "Compiling pigpio (this may take a few minutes)..."
-        make
-        sudo make install
-
-        # Clean up
-        cd /tmp
-        rm -rf "$TEMP_DIR"
-
-        echo "Status: pigpio installed successfully."
-
-        # Refresh library links
-        sudo ldconfig
-    fi
+    echo "pigpio dependency has been completely removed in favor of standard Linux GPIO and PWM APIs!"
 
     # Check if system service file exists to start/stop led-toggle
     if [ -f "$LED_SERVICE_FILE_GLOBAL_PATH" ]; then
@@ -163,8 +130,6 @@ check_led_toggle_dependencies() {
 [Unit]
 Description=Raspberry Pi GPIO Toggle Service
 After=network.target
-# Ensure we don't conflict with the standard pigpio daemon
-Conflicts=pigpiod.service
 
 [Service]
 # Real-Time Scheduling Configuration

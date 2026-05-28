@@ -3,9 +3,12 @@ project(led-toggle)
 
 set (CMAKE_C_STANDARD 11)
 
-# Find threads (required for pigpio)
+# Find threads
 find_package(Threads REQUIRED)
 
-# Executable for pigpio implementation
+# Find libgpiod
+find_library(GPIOD_LIB gpiod REQUIRED)
+
+# Executable implementation
 add_executable(led-toggle led-toggle.c)
-target_link_libraries(led-toggle pigpio ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(led-toggle ${CMAKE_THREAD_LIBS_INIT} ${GPIOD_LIB})
