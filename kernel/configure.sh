@@ -68,6 +68,69 @@ argument_parse() {
     done
 }
 
+# Platform configuration
+config_platform() {
+    echo "-> Hardening platform for RPi 3B+ (BCM2837 / Cortex-A53)..."
+
+    # =====================================================================
+    # 1. CRITICAL: CPU & Memory sizing
+    # =====================================================================
+    # Pi 3B+ has exactly 4 cores
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val NR_CPUS 4
+
+    # Cortex-A53 supports 48-bit VA / 48-bit PA maximum
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val ARM64_VA_BITS 48
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val ARM64_PA_BITS 48
+
+    # =====================================================================
+    # 2. RECOMMENDED: Strip non-BCM architectures
+    # =====================================================================
+    # Keep ONLY Broadcom / BCM2835 platform support
+    for arch in ACTIONS AIROHA SUNXI ALPINE APPLE ARTPEC AXIADO BERLIN \
+                BLAIZE CIX EXYNOS K3 LG1K HISI KEEMBAY MEDIATEK MESON \
+                MICROCHIP SPARX5 MVEBU NXP LAYERSCAPE MXC S32 MA35 NPCM \
+                QCOM REALTEK RENESAS ROCKCHIP SEATTLE INTEL_SOCFPGA SOPHGO \
+                STM32 SYNQUACER TEGRA TESLA_FSD SPRD THUNDER THUNDER2 \
+                UNIPHIER VEXPRESS VISCONTI XGENE ZYNQMP; do
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable "ARCH_${arch}"
+    done
+
+    # Also disable non-Pi Broadcom platforms
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BCM_IPROC
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BCMBCA
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BRCMSTB
+
+    # =====================================================================
+    # 3. Ensure critical Pi 3B+ drivers are built-in
+    # =====================================================================
+    # Ethernet - built-in for faster boot (no initramfs dependency)
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_LAN78XX
+    
+    # Enable FTRACE for latency analysis (cyclictest --breaktrace)
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable FTRACE
+    
+    # Ensure VC4 GPU driver is available (for HDMI output)
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable DRM_VC4
+
+    # =====================================================================
+    # 4. Strip Pi 4/5 specific configs
+    # =====================================================================
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BCM2711_THERMAL
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PINCTRL_BCM2712
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BCM2712_MIP
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM2711_DVP
+
+    # Strip enterprise Broadcom clock drivers
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_63XX
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_NS2
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_SR
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable COMMON_CLK_IPROC
+
+    # (Note: DEBUG_INFO is explicitly retained)
+
+    echo "✓ Platform hardened for RPi 3B+."
+}
+
 # Kernel configuration
 config_kernel() {
     echo "Starting configuration for kernel source at: ${BUILD_DIR_PATH}"
@@ -86,6 +149,9 @@ config_kernel() {
 
     # Enable High Resolution Timers (critical for precision in both, but essential for RT)
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HIGH_RES_TIMERS
+
+    # Harden the config for the specific target platform
+    config_platform
 
     # PREEMPT_RT and specific Baseline settings
     if [ "${ENABLE_RT}" = "true" ]; then
@@ -201,7 +267,11 @@ config_validation() {
     fi
 
     # Validate LOCALVERSION
-    CURRENT_LV=$("${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --value LOCALVERSION || true)
+    CURRENT_LV=$("${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --state LOCALVERSION || true)
+    # The output of --state for strings includes quotes, so strip them
+    CURRENT_LV="${CURRENT_LV%\"}"
+    CURRENT_LV="${CURRENT_LV#\"}"
+    
     if [ "${CURRENT_LV}" != "${LOCALVERSION}" ]; then
         echo "WARNING: LOCALVERSION is set to '${CURRENT_LV}', expected '${LOCALVERSION}'."
         read -p "Would you like to correct this? (Y/n) " -n 1 -r
@@ -231,7 +301,7 @@ config_backup() {
 # ==============================================================================
 main() {
     environment_var
-    argument_parse
+    argument_parse "$@"
     config_kernel
     config_validation
     config_backup
