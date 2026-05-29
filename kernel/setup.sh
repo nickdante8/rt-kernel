@@ -149,8 +149,8 @@ kernel_dependencies() {
             echo "Kernel source directory not found at: ${BUILD_DIR_PATH}"
             echo "Cloning repository: ${KERNEL_REPO}"
             echo "Branch: ${KERNEL_BRANCH} (Depth: ${KERNEL_DEPTH})"
-            echo "<4> WARNING: If kernel headers are required separately, install them by running 'sudo apt install linux-headers-rpi-v8'. \
-                Check https://www.raspberrypi.com/documentation/computers/linux_kernel.html#kernel-headers for more info."
+            echo "<4> WARNING: If kernel headers are required separately, install them by running 'sudo apt install linux-headers-rpi-v8'."
+            echo "  Check https://www.raspberrypi.com/documentation/computers/linux_kernel.html#kernel-headers for more info."
             
             # We run git clone. Depth 1 saves a lot of space and time.
             git clone --branch "${KERNEL_BRANCH}" --depth "${KERNEL_DEPTH}" "${KERNEL_REPO}" "${BUILD_DIR_PATH}"

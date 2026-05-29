@@ -65,7 +65,7 @@ environment_var() {
 }
 
 # Deploy kernel to remote device
-deploy_kernel() {
+kernel_deploy() {
     echo "=============================================================================="
     echo "Deploying Kernel ${OS_PREFIX} to ${SSH_USER}@${SSH_HOST}"
     echo "=============================================================================="
@@ -87,10 +87,18 @@ deploy_kernel() {
     # modules into our local dist/ folder without needing sudo. 
     # Here, we simply move those pre-extracted modules into the Pi's live /lib/modules/
     # -------------------------------------------------------------------------
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
+        cd ${REMOTE_TEMP_DIR}/${BUILD_DIR_NAME}/modules/lib/modules/ && \
+        for dir in *; do \
+            if [ -d \"\$dir\" ]; then \
+                echo '$(cat .sshpass)' | sudo -S rm -rf \"/lib/modules/\$dir\"; \
+            fi; \
+        done
+    "
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_TEMP_DIR}/${BUILD_DIR_NAME}/modules/lib/modules/* /lib/modules/"
     
-    # Create the os_prefix directory in the boot partition
-    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S mkdir -p ${REMOTE_BOOT_DIR}/${OS_PREFIX}"
+    # Remove any existing os_prefix directory and recreate it to ensure a clean slate
+    ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S rm -rf ${REMOTE_BOOT_DIR}/${OS_PREFIX} && echo '$(cat .sshpass)' | sudo -S mkdir -p ${REMOTE_BOOT_DIR}/${OS_PREFIX}"
 
     # Install boot files (image, dtbs, overlays) to the isolated os_prefix directory
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_TEMP_DIR}/${BUILD_DIR_NAME}/boot/* ${REMOTE_BOOT_DIR}/${OS_PREFIX}"
@@ -98,12 +106,12 @@ deploy_kernel() {
     # If the overlays directory is missing (which happens when building pure mainline kernels),
     # borrow the factory overlays from the Raspberry Pi OS.
     ${SSH_CMD} -t "${SSH_USER}@${SSH_HOST}" "
-        if [ ! -d ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays ]; then
+        if [ ! -d ${REMOTE_BOOT_DIR}/${OS_PREFIX}/overlays ]; then
             echo '   Notice: overlays directory missing in build. Borrowing factory overlays from Pi OS...'
             echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_BOOT_DIR}/overlays ${REMOTE_BOOT_DIR}/${OS_PREFIX}
-        elif [ -z \"\$(ls -A ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays 2>/dev/null)\" ]; then
+        elif [ -z \"\$(ls -A ${REMOTE_BOOT_DIR}/${OS_PREFIX}/overlays 2>/dev/null)\" ]; then
             echo '   Notice: overlays directory exists but has no files. Borrowing factory overlays from Pi OS...'
-            echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_BOOT_DIR}/overlays/* ${REMOTE_BOOT_DIR}/${OS_PREFIX}overlays/
+            echo '$(cat .sshpass)' | sudo -S cp -r ${REMOTE_BOOT_DIR}/overlays/* ${REMOTE_BOOT_DIR}/${OS_PREFIX}/overlays/
         fi
     "
     
@@ -118,7 +126,8 @@ deploy_kernel() {
     echo "=============================================================================="
 }
 
-kernel_boot_update() {
+# Make sure to check config.env before running this utility as it will modify cmdline.txt of the kernel
+kernel_boot_type_update() {
     # Ensure dual-boot config and boot parameters are set up
     echo "-> Configuring Boot parameters..."
     ${SSH_CMD} "${SSH_USER}@${SSH_HOST}" "
@@ -146,7 +155,7 @@ kernel_boot_update() {
 }
 
 # Create remote helper files which will be copied to remote target
-dual_boot_helpers() {
+dual_boot_helpers_deploy() {
     local helper_remote_dir="${SCRIPT_DIR}/helper_remote"
 
     # Check if folder exist
@@ -308,14 +317,14 @@ main() {
 
     case "${COMMAND}" in
         kernel-deploy)
-            deploy_kernel
-            kernel_boot_update
+            kernel_deploy
+            kernel_boot_type_update
             ;;
         kernel-boot-update)
-            kernel_boot_update
+            kernel_boot_type_update
             ;;
         dual-boot-helpers)
-            dual_boot_helpers
+            dual_boot_helpers_deploy
             ;;
         switch-kernel)
             echo

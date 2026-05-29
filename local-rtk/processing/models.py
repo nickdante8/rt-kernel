@@ -49,10 +49,9 @@ class SaleaeCrossMetrics:
     time_axis: np.ndarray
 
 @dataclass
-class CyclictestMetrics:
-    """Captures internal kernel-space scheduling jitter."""
-    t0: str
-    t1: str
+class CyclictestThreadMetrics:
+    """Scheduling jitter metrics for a single cyclictest thread (one CPU)."""
+    cpu: int
     histogram: Dict[str, int]
     latencies: List[int]
     frequencies: List[int]
@@ -62,6 +61,14 @@ class CyclictestMetrics:
     avg: float
     std_dev: float
     peak_to_peak: float
+    overflow: int
+
+@dataclass
+class CyclictestMetrics:
+    """Container for all cyclictest threads across CPUs."""
+    t0: str
+    t1: str
+    threads: Dict[str, CyclictestThreadMetrics]  # keyed by thread id ("0", "1", ...)
 
 @dataclass
 class CpuTimelineMetrics:

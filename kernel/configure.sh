@@ -63,13 +63,15 @@ argument_parse() {
                 shift
                 ;;
             *)
+                echo "Parameters accepatable are --non-interactive."
+                exit 1
                 ;;
         esac
     done
 }
 
 # Platform configuration
-config_platform() {
+config_3_b_plus_platform() {
     echo "-> Hardening platform for RPi 3B+ (BCM2837 / Cortex-A53)..."
 
     # =====================================================================
@@ -115,10 +117,8 @@ config_platform() {
     # =====================================================================
     # 4. Strip Pi 4/5 specific configs
     # =====================================================================
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BCM2711_THERMAL
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PINCTRL_BCM2712
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BCM2712_MIP
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM2711_DVP
 
     # Strip enterprise Broadcom clock drivers
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_63XX
@@ -151,7 +151,7 @@ config_kernel() {
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HIGH_RES_TIMERS
 
     # Harden the config for the specific target platform
-    config_platform
+    config_3_b_plus_platform
 
     # PREEMPT_RT and specific Baseline settings
     if [ "${ENABLE_RT}" = "true" ]; then

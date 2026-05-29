@@ -13,9 +13,9 @@ cd "$SCRIPT_DIR"
 
 # Required dependencies
 # install pakages true name
-INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio" "libgpiod-dev" "gpiod")
+INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio" "libgpiod-dev" "gpiod" "rt-tests" "stress-ng")
 # command name to check if they are available
-REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio" "gpiodetect" "gpiodetect")
+REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio" "gpiodetect" "gpiodetect" "cyclictest" "stress-ng")
 
 
 # ==============================================================================

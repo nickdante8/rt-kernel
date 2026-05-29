@@ -197,7 +197,7 @@ test_start() {
     mkdir -p "${OUTPUT_DIR}/${load_type}"
 
     # Test specific behavior based on requested load type
-    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
+    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]] || [[ "${load_type}" == "${LOAD_TYPE_CPU}" ]]; then
         # Idle
         echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
@@ -211,6 +211,10 @@ test_start() {
         # Net and USB load
         iperf3 -s --verbose --json --logfile "${OUTPUT_DIR}/${load_type}/network_results.json" &
         IPERF3_PID=$!
+    elif [[ "${load_type}" == "${LOAD_TYPE_FULL}" ]]; then
+        # Full load
+        iperf3 -s --verbose --json --logfile "${OUTPUT_DIR}/${load_type}/network_results.json" &
+        IPERF3_PID=$!
     else
         echo "ERROR: Load test type request isn't known: ${load_type}"
         exit 1
@@ -221,7 +225,7 @@ test_end() {
     local load_type="$1"
     
     # Test specific behavior based on requested load type
-    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
+    if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]] || [[ "${load_type}" == "${LOAD_TYPE_CPU}" ]]; then
         # Idle
         echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
@@ -231,6 +235,9 @@ test_end() {
         # USB load
         echo ""
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
+        # Net and USB load
+        sudo kill -SIGKILL $IPERF3_PID || true
+    elif [[ "${load_type}" == "${LOAD_TYPE_FULL}" ]]; then
         # Net and USB load
         sudo kill -SIGKILL $IPERF3_PID || true
     else
@@ -278,7 +285,7 @@ testing() {
 
         # Add a small sleep to prevent spike during the test
         # After this, ideally, the tests on the remote must be finished
-        sleep 1
+        sleep 2
 
         # Check test state result
         sshpass -f .sshpass ssh -t "${RPI_USER}@${RPI_HOST}" \
