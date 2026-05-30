@@ -174,40 +174,50 @@ def plot_histogram_combined(data, output_file, title=None, label=None, show=Fals
 
 def plot_histogram_cyclic_test(data, output_file, title=None, label=None, show=False):
     """
-    Generates and saves a histogram of the jitter data.
+    Generates and saves overlaid per-CPU histograms from multi-thread cyclictest data.
+    Each thread (CPU) is rendered as a separate semi-transparent bar series.
     """
     plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
+    fig, ax = plt.subplots(figsize=(14, 8))
 
-    # Create the histogram
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    if label == None:
-        label='For both channels'
-    ax.bar(data.latencies, data.frequencies, width=1.0, alpha=0.75, label=f"{label}")
+    # Color palette for up to 4 CPUs (housekeeping vs isolated distinction)
+    colors = ['#2196F3', '#4CAF50', '#FF5722', '#9C27B0']
+    
+    # Sort threads by thread id for consistent ordering
+    sorted_threads = sorted(data.threads.items(), key=lambda x: int(x[0]))
 
-    # Add a vertical line for the mean
-    ax.axvline(data.avg, color='r', linestyle='--', linewidth=2, label=f"Mean: {data.avg:.2f} µs")
+    for idx, (thread_id, thread) in enumerate(sorted_threads):
+        color = colors[idx % len(colors)]
+        cpu_label = f"CPU{thread.cpu}"
+        
+        ax.bar(thread.latencies, thread.frequencies, width=1.0, alpha=0.55,
+               color=color, label=f"{cpu_label}")
+        ax.axvline(thread.avg, color=color, linestyle='--', linewidth=1.5, alpha=0.8,
+                   label=f"{cpu_label} Mean: {thread.avg:.2f} µs")
 
     # --- Formatting the Plot ---
-    if title == None:
-        title = "CyclicTest Latency for Channel 0 and 1"
+    if title is None:
+        title = "CyclicTest Latency Distribution (per CPU)"
     ax.set_title(title, fontsize=16)
-    ax.set_xlabel(f'Latency (µs)', fontsize=12)
-    ax.set_ylabel('Freqcuency (Number of Occurences)', fontsize=12)
+    ax.set_xlabel('Latency (µs)', fontsize=12)
+    ax.set_ylabel('Frequency (Number of Occurrences)', fontsize=12)
     ax.grid(True, linestyle='--', alpha=0.5)
-    ax.legend()
+    ax.legend(loc='upper right', fontsize=9)
 
-    # Add a text box with detailed statistics
-    stats_text = (
-        f"Total Cycles: {data.cycles}\n"
-        f"Std Dev: {data.std_dev:.2f} µs\n"
-        f"Min Latency: {data.min:.2f} µs\n"
-        f"Max Latency (WCET): {data.max:.2f} µs\n"
-        f"Peak-to-Peak: {data.peak_to_peak:.2f} µs"
-    )
+    # Build a combined stats text box with per-CPU breakdown
+    stats_lines = []
+    for thread_id, thread in sorted_threads:
+        overflow_text = f"  ⚠ Overflow: {thread.overflow}" if thread.overflow > 0 else ""
+        stats_lines.append(
+            f"CPU{thread.cpu}: Cycles={thread.cycles}  "
+            f"Min={thread.min:.0f}  Max={thread.max:.0f}  "
+            f"Avg={thread.avg:.2f}  Std={thread.std_dev:.2f}  "
+            f"P2P={thread.peak_to_peak:.0f}{overflow_text}"
+        )
+    stats_text = "\n".join(stats_lines)
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
+    ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
+            verticalalignment='top', fontfamily='monospace', bbox=props)
 
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')

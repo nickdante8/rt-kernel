@@ -1,13 +1,12 @@
 import math
 import numpy as np
-from models import CyclictestMetrics, MpstatMetrics, CpuTimelineMetrics
+from models import CyclictestMetrics, CyclictestThreadMetrics, MpstatMetrics, CpuTimelineMetrics
 
-def cyclictest(data):
-    # Extract thread 0 statistics
-    thread_data = data['thread']['0']
+def _parse_cyclictest_thread(thread_id, thread_data):
+    """Parse a single cyclictest thread into CyclictestThreadMetrics."""
     hist_data = thread_data['histogram']
     
-    # Convert histogram to latency
+    # Convert histogram to latency arrays
     latencies = [int(k) for k in hist_data.keys()]
     frequencies = list(hist_data.values())
 
@@ -25,9 +24,8 @@ def cyclictest(data):
     else:
         std_dev = 0.0
 
-    return CyclictestMetrics(
-        t0=data['start_time'],
-        t1=data['end_time'],
+    return CyclictestThreadMetrics(
+        cpu=thread_data.get('cpu', int(thread_id)),
         histogram=hist_data,
         latencies=latencies,
         frequencies=frequencies,
@@ -37,6 +35,19 @@ def cyclictest(data):
         avg=avg_lat,
         std_dev=std_dev,
         peak_to_peak=(thread_data['max'] - thread_data['min']) if len(latencies) > 0 else 0,
+        overflow=thread_data.get('overflow', 0),
+    )
+
+def cyclictest(data):
+    """Parse cyclictest JSON output into CyclictestMetrics with per-thread data."""
+    threads = {}
+    for thread_id, thread_data in data['thread'].items():
+        threads[thread_id] = _parse_cyclictest_thread(thread_id, thread_data)
+
+    return CyclictestMetrics(
+        t0=data['start_time'],
+        t1=data['end_time'],
+        threads=threads,
     )
 
 def proc_interrupts(start_snap, end_snap, num_cpus):

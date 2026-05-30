@@ -77,14 +77,6 @@ package_artifacts() {
     # RPi dtbs are specifically in the broadcom/ folder for arm64
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/broadcom/"*.dtb "${DIST_DIR}/boot/" || true
     
-    # Rename the specific target device tree if required by the bootloader
-    if [ -n "${SOURCE_DTB_NAME}" ] && [ -n "${TARGET_DTB_NAME}" ]; then
-        if [ -f "${DIST_DIR}/boot/${SOURCE_DTB_NAME}" ]; then
-            mv "${DIST_DIR}/boot/${SOURCE_DTB_NAME}" "${DIST_DIR}/boot/${TARGET_DTB_NAME}"
-            echo "   Renamed ${SOURCE_DTB_NAME} to ${TARGET_DTB_NAME} for firmware compatibility."
-        fi
-    fi
-
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/overlays/"*.dtb* "${DIST_DIR}/boot/overlays/" || true
     cp "${BUILD_DIR_PATH}/arch/arm64/boot/dts/overlays/README" "${DIST_DIR}/boot/overlays/" || true
 

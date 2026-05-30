@@ -99,7 +99,7 @@ timing_measurement() {
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_start.txt"
 
         # Start cyclictest (Internal Latency)
-        sudo cyclictest -m -a 0 -s -t1 -p99 -i${cyclictest_interval} -h${cyclictest_hist} -D ${CAPTURE_DURATION_S_EXTENDED} \
+        sudo cyclictest -m -s -t4 -p99 -i${cyclictest_interval} -h${cyclictest_hist} -D ${CAPTURE_DURATION_S_EXTENDED} \
             --json="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.json" --histfile="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.log" &
         CYCLIC_PID=$!
 
@@ -123,7 +123,11 @@ timing_measurement() {
         done
 
         echo "Found led-toggle PID: ${led_pid}"
-        pidstat -p "${led_pid}",$(pgrep iperf3),$(pgrep fio) -u -w 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/pidstat.log" &
+        local pid_list="${led_pid}"
+        pgrep iperf3 > /dev/null 2>&1 && pid_list="${pid_list},$(pgrep -d, iperf3)"
+        pgrep fio > /dev/null 2>&1 && pid_list="${pid_list},$(pgrep -d, fio)"
+        pgrep stress-ng > /dev/null 2>&1 && pid_list="${pid_list},$(pgrep -d, stress-ng)"
+        pidstat -p "${pid_list}" -u -w 1 ${CAPTURE_DURATION_S_EXTENDED} > "${OUTPUT_DIR}/${LOAD_TYPE}/pidstat.log" &
         PID_STAT_PID=$!
 
         # Save pid state for future logging
@@ -144,9 +148,10 @@ test_start() {
     local load_type="$1"
 
     # Variable calculations
-    local cyclictest_interval=$(($NOMINAL_PERIOD_US / 2))
-    # TODO: Update it for all load types
-    local cyclictest_hist=90
+    # Calculate cyclictest interval: semi-period minus 3% offset to break phase-locking
+    local cyclictest_interval=$(( (NOMINAL_PERIOD_US / 2) * 97 / 100 ))
+    # Update it for all load types
+    local cyclictest_hist=1000
 
     # Create a directory for the test results
     echo "<6>INFO: Start test ${LOAD_TYPE}, ${CAPTURE_DURATION_S}"
@@ -154,7 +159,13 @@ test_start() {
     # Test specific behavior based on requested load type
     if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
         # Idle
-        cyclictest_hist=100
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
+    elif [[ "${load_type}" == "${LOAD_TYPE_CPU}" ]]; then
+        # Start stress load
+        chrt -o 0 nice -n 19 stress-ng --cpu 4 --timeout ${CAPTURE_DURATION_S_EXTENDED}s &
+        STRESS_NG_PID=$!
+
+        # CPU load
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
         # iperf3 network load
@@ -162,11 +173,10 @@ test_start() {
         IPERF3_PID=$!
 
         # Net load
-        cyclictest_hist=180
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
         # fio USB load
-        sudo fio --name=${load_type} --filename=/dev/sda --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
             --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
             --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
@@ -174,11 +184,10 @@ test_start() {
         FIO_PID=$!
 
         # USB load
-        cyclictest_hist=180
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
         # fio USB load
-        sudo fio --name=${load_type} --filename=/dev/sda --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
             --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
             --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
@@ -189,7 +198,24 @@ test_start() {
         IPERF3_PID=$!
 
         # Net and USB load
-        cyclictest_hist=200
+        timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
+    elif [[ "${load_type}" == "${LOAD_TYPE_FULL}" ]]; then
+        # fio USB load
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+            --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
+            --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
+            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
+            --output-format=json --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
+        FIO_PID=$!
+        # iperf3 network load
+        iperf3 -c ${SERVER_IP} -R -i 1 -t ${CAPTURE_DURATION_S_EXTENDED} &
+        IPERF3_PID=$!
+
+        # Start stress load (CPU and memory)
+        chrt -o 0 nice -n 19 stress-ng --cpu 4 --vm 2 --vm-bytes 50% --timeout ${CAPTURE_DURATION_S_EXTENDED}s &
+        STRESS_NG_PID=$!
+
+        # Full load
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     else
         echo "<3>ERROR: Load test type request isn't known: ${load_type}"
@@ -207,6 +233,9 @@ test_stop() {
     if [[ "${load_type}" == "${LOAD_TYPE_IDLE}" ]]; then
         # Idle
         echo ""
+    elif [[ "${load_type}" == "${LOAD_TYPE_CPU}" ]]; then
+        # CPU load
+        sudo kill -SIGKILL $STRESS_NG_PID || true
     elif [[ "${load_type}" == "${LOAD_TYPE_NET}" ]]; then
         # Net load
         sudo kill -SIGKILL $IPERF3_PID || true
@@ -216,6 +245,9 @@ test_stop() {
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
         # Net and USB load
         sudo kill -SIGKILL $IPERF3_PID $FIO_PID || true
+    elif [[ "${load_type}" == "${LOAD_TYPE_FULL}" ]]; then
+        # Full load
+        sudo kill -SIGKILL $IPERF3_PID $FIO_PID $STRESS_NG_PID || true
     else
         echo "<3>ERROR: Load test type request isn't known: ${load_type}"
         exit 1
@@ -248,6 +280,12 @@ main() {
     # Temporary
     cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"
 $(date +%Y-%m-%d-%H:%M:%S.%N)
+
+# Save kernel version
+$(uname -a)
+
+# Boot options
+$(tail -n 3 /boot/firmware/config.txt)
 EOF
 
     # Start testing. Initialize all tooling

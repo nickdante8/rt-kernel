@@ -13,9 +13,9 @@ cd "$SCRIPT_DIR"
 
 # Required dependencies
 # install pakages true name
-INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio" "libgpiod-dev" "gpiod")
+INSTALL_PKG=("build-essential" "cmake" "sysstat" "iperf3" "fio" "libgpiod-dev" "gpiod" "rt-tests" "stress-ng")
 # command name to check if they are available
-REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio" "gpiodetect" "gpiodetect")
+REQUIRED_PKG=("gcc" "cmake" "pidstat" "iperf3" "fio" "gpiodetect" "gpiodetect" "cyclictest" "stress-ng")
 
 
 # ==============================================================================
@@ -120,13 +120,10 @@ check_led_toggle_dependencies() {
     echo "pigpio dependency has been completely removed in favor of standard Linux GPIO and PWM APIs!"
 
     # Check if system service file exists to start/stop led-toggle
-    if [ -f "$LED_SERVICE_FILE_GLOBAL_PATH" ]; then
-        echo "Status: $LED_SERVICE_FILE_GLOBAL_PATH already exists. Skipping installation."
-    else
-        echo "Status: Installing system service..."
+    echo "Status: Installing system service..."
 
-        # Install the system service
-        tee "$LED_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
+    # Install the system service
+    tee "$LED_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
 [Unit]
 Description=Raspberry Pi GPIO Toggle Service
 After=network.target
@@ -159,18 +156,17 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-        echo "Status: File created. Finalizing systemd configuration..."
+    echo "Status: File created. Finalizing systemd configuration..."
 
-        mv $LED_SERVICE_FILE_LOCAL_PATH $LED_SERVICE_FILE_GLOBAL_PATH
-        # Reload systemd to recognize the new file
-        systemctl daemon-reload
+    mv $LED_SERVICE_FILE_LOCAL_PATH $LED_SERVICE_FILE_GLOBAL_PATH
+    # Reload systemd to recognize the new file
+    systemctl daemon-reload
 
-        # Enable the service to start automatically on boot
-        systemctl enable ${LED_SERVICE_ENABLE_FILE_NAME}
+    # Enable the service to start automatically on boot
+    systemctl enable ${LED_SERVICE_ENABLE_FILE_NAME}
 
-        echo "Success: ${LED_SERVICE_FILE_NAME} is now active and enabled."
-        echo "To start it run: sudo systemctl start ${LED_SERVICE_FILE_NAME}"
-    fi
+    echo "Success: ${LED_SERVICE_FILE_NAME} is now active and enabled."
+    echo "To start it run: sudo systemctl start ${LED_SERVICE_FILE_NAME}"
 }
 
 # Check test-exec service and file
@@ -181,22 +177,19 @@ check_test_exec_dependencies() {
     chmod +x ${TEST_EXEC_STATE_PATH}
 
     # Check if system service file exists
-    if [ -f "$TEST_EXEC_SERVICE_FILE_GLOBAL_PATH" ]; then
-        echo "Status: $TEST_EXEC_SERVICE_FILE_GLOBAL_PATH already exists. Skipping installation."
-    else
-        echo "Status: Installing system service..."
+    echo "Status: Installing system service..."
 
-        # Install the system service
-        tee "$TEST_EXEC_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
+    # Install the system service
+    tee "$TEST_EXEC_SERVICE_FILE_LOCAL_PATH" > /dev/null <<EOF
 [Unit]
 Description=Raspberry Pi Test execution Service
 After=network.target
 
 [Service]
 # Real-Time Scheduling Configuration
-# This forces the kernel to prioritize this task over the network stack
-CPUSchedulingPolicy=fifo
-CPUSchedulingPriority=99
+# Do NOT use FIFO/99 here to avoid competing with led-toggle
+CPUSchedulingPolicy=other
+CPUSchedulingPriority=0
 
 # Adjust the path to where binary is actually located
 ExecStartPre=/bin/sleep ${TEST_EXEC_SERVICE_DELAY_START_TIME}
@@ -219,18 +212,17 @@ User=root
 WantedBy=multi-user.target
 EOF
 
-        echo "Status: File created. Finalizing systemd configuration..."
+    echo "Status: File created. Finalizing systemd configuration..."
 
-        mv $TEST_EXEC_SERVICE_FILE_LOCAL_PATH $TEST_EXEC_SERVICE_FILE_GLOBAL_PATH
-        # Reload systemd to recognize the new file
-        systemctl daemon-reload
+    mv $TEST_EXEC_SERVICE_FILE_LOCAL_PATH $TEST_EXEC_SERVICE_FILE_GLOBAL_PATH
+    # Reload systemd to recognize the new file
+    systemctl daemon-reload
 
-        # Enable the service to start automatically on boot
-        systemctl enable ${TEST_EXEC_SERVICE_ENABLE_FILE_NAME}
+    # Enable the service to start automatically on boot
+    systemctl enable ${TEST_EXEC_SERVICE_ENABLE_FILE_NAME}
 
-        echo "Success: ${TEST_EXEC_SERVICE_FILE_NAME} is now active and enabled."
-        echo "To start it run: sudo systemctl start ${TEST_EXEC_SERVICE_FILE_NAME}"
-    fi
+    echo "Success: ${TEST_EXEC_SERVICE_FILE_NAME} is now active and enabled."
+    echo "To start it run: sudo systemctl start ${TEST_EXEC_SERVICE_FILE_NAME}"
 }
 
 
