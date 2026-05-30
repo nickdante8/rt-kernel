@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -12,6 +13,9 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <gpiod.h>
+#include <sched.h>
+#include <pthread.h>
+#include <sys/mman.h>
 
 /* Global redefines */
 #define STD_FALSE   ((uint8_t)0U)
@@ -34,6 +38,15 @@ typedef struct led_options {
     uint32_t u32_duration_s;
     bool b_relative_sleep;
 } led_options_t;
+
+/* Jitter statistics collected during the toggle loop */
+typedef struct jitter_stats {
+    int64_t min_jitter_ns;
+    int64_t max_jitter_ns;
+    int64_t sum_jitter_ns;
+    uint64_t sum_sq_jitter_ns;  /* For stdev calculation */
+    uint32_t count;
+} jitter_stats_t;
 
 typedef struct edges_timestamp {
     double start_timestamp[EDGES_COUNT];
@@ -328,193 +341,263 @@ int arg_parse(int argc, char **argv, led_options_t *led_param, char *output_path
     return exit_code;
 }
 
+int isolation_priority_cfg(void) {
+    int exit_code = EXIT_SUCCESS;
+
+    /* Lock all current and future pages in RAM — mandatory for RT */
+    if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+        syslog(LOG_WARNING, "mlockall failed: %m — page faults may cause jitter");
+        exit_code = EXIT_FAILURE;
+    }
+
+    /* Pin this thread to an isolated CPU core (core 3) */
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(3, &cpuset);
+    if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0) {
+        syslog(LOG_WARNING, "Failed to set CPU affinity to core 3: %m");
+        exit_code = EXIT_FAILURE;
+    } else {
+        syslog(LOG_INFO, "Pinned to CPU core 3 for RT isolation.");
+    }
+
+    /* Set real-time scheduling from within the process */
+    struct sched_param sp = { .sched_priority = 99 };
+    if (sched_setscheduler(0, SCHED_FIFO, &sp) != 0) {
+        syslog(LOG_WARNING, "Failed to set SCHED_FIFO: %m");
+        exit_code = EXIT_FAILURE;
+    }
+
+    return exit_code;
+}
+
 int main(int argc, char **argv) {
     int exit_code = EXIT_SUCCESS;
-    struct sigaction action = { .sa_handler = signalHandler };
 
-    /* Toggle specific needs */
-    bool gpiod_initialized = false;
-    bool pwm_initialized = false;
-    led_options_t led_param = {0};
-    char output_path[PATH_MAX_LEN] = {0};
-    /* Synchronization tracking arrays with edges timestamp */
-    edges_timestamp_t et = {0};
+    /* Core isolation and priority set */
+    if (isolation_priority_cfg() != EXIT_SUCCESS) {
+        exit_code = EXIT_FAILURE;
+    } else {
+        struct sigaction action = { .sa_handler = signalHandler };
 
-    /* Time wakeup */
-    timespec_t next_wakeup;
-    fptr_sleep time_sleep_ptr = NULL;
+        /* Toggle specific needs */
+        bool gpiod_initialized = false;
+        bool pwm_initialized = false;
+        led_options_t led_param = {0};
+        char output_path[PATH_MAX_LEN] = {0};
+        /* Synchronization tracking arrays with edges timestamp */
+        edges_timestamp_t et = {0};
+        jitter_stats_t jstats = { .min_jitter_ns = INT64_MAX, .max_jitter_ns = INT64_MIN, .sum_jitter_ns = 0, .sum_sq_jitter_ns = 0, .count = 0 };
 
-    /* Time related variables */
-    double start_time = get_time_s();
-    double current_time = start_time;
-    double end_time = 0.0;
+        /* Time wakeup */
+        timespec_t next_wakeup;
+        fptr_sleep time_sleep_ptr = NULL;
 
-    /* gpiod handles */
-    struct gpiod_chip *chip = NULL;
-    struct gpiod_line_settings *output_settings = NULL;
-    struct gpiod_line_settings *input_settings = NULL;
-    struct gpiod_line_config *output_line_cfg = NULL;
-    struct gpiod_line_config *input_line_cfg = NULL;
-    struct gpiod_request_config *req_cfg = NULL;
-    struct gpiod_line_request *request = NULL;
+        /* Time related variables */
+        double start_time = get_time_s();
+        double current_time = start_time;
+        double end_time = 0.0;
 
-    /* Open a connection to the system logger */
-    openlog("LedToggleService", LOG_PID | LOG_CONS, LOG_USER);
-    syslog(LOG_INFO, "GPIO Toggle Service (using libgpiod v2).");
+        /* gpiod handles */
+        struct gpiod_chip *chip = NULL;
+        struct gpiod_line_settings *output_settings = NULL;
+        struct gpiod_line_settings *input_settings = NULL;
+        struct gpiod_line_config *output_line_cfg = NULL;
+        struct gpiod_line_config *input_line_cfg = NULL;
+        struct gpiod_request_config *req_cfg = NULL;
+        struct gpiod_line_request *request = NULL;
 
-    /* Catch the SIGTERM signal sent by 'systemctl stop' */
-    sigaction(SIGTERM, &action, NULL);
-    sigaction(SIGINT, &action, NULL);
+        /* Open a connection to the system logger */
+        openlog("LedToggleService", LOG_PID | LOG_CONS, LOG_USER);
+        syslog(LOG_INFO, "GPIO Toggle Service (using libgpiod v2).");
 
-    /* Parse arguments */
-    exit_code = arg_parse(argc, argv, &led_param, output_path);
+        /* Catch the SIGTERM signal sent by 'systemctl stop' */
+        sigaction(SIGTERM, &action, NULL);
+        sigaction(SIGINT, &action, NULL);
 
-    /* Initialize GPIO via libgpiod v2 */
-    if (exit_code == EXIT_SUCCESS) {
-        /* Open a chip by path*/
-        chip = gpiod_chip_open("/dev/gpiochip0");
-        if (!chip) {
-            syslog(LOG_ERR, "GPIO: Failed to open /dev/gpiochip0: %m");
-            exit_code = EXIT_FAILURE;
-        } else {
-            /* Create a new line settings object */
-            output_settings = gpiod_line_settings_new();
-            if (!output_settings) {
-                syslog(LOG_ERR, "GPIO: Failed to allocate line settings");
+        /* Parse arguments */
+        exit_code = arg_parse(argc, argv, &led_param, output_path);
+
+        /* Initialize GPIO via libgpiod v2 */
+        if (exit_code == EXIT_SUCCESS) {
+            /* Open a chip by path*/
+            chip = gpiod_chip_open("/dev/gpiochip0");
+            if (!chip) {
+                syslog(LOG_ERR, "GPIO: Failed to open /dev/gpiochip0: %m");
                 exit_code = EXIT_FAILURE;
             } else {
-                /* Set pin direction and output value */
-                gpiod_line_settings_set_direction(output_settings, GPIOD_LINE_DIRECTION_OUTPUT);
-                gpiod_line_settings_set_output_value(output_settings, GPIOD_LINE_VALUE_INACTIVE);
-
-                /* Create a new line config object */
-                output_line_cfg = gpiod_line_config_new();
-                if (!output_line_cfg) {
-                    syslog(LOG_ERR, "GPIO: Failed to allocate line config");
+                /* Create a new line settings object */
+                output_settings = gpiod_line_settings_new();
+                if (!output_settings) {
+                    syslog(LOG_ERR, "GPIO: Failed to allocate line settings");
                     exit_code = EXIT_FAILURE;
                 } else {
-                    unsigned int offset = SOFT_PIN;
+                    /* Set pin direction and output value */
+                    gpiod_line_settings_set_direction(output_settings, GPIOD_LINE_DIRECTION_OUTPUT);
+                    gpiod_line_settings_set_output_value(output_settings, GPIOD_LINE_VALUE_INACTIVE);
 
-                    /* Based on line settings of the pin for the direction and output,
-                     * of the line configuration; apply it to the array of offsets,
-                     * in this case SOFT_PIN
-                     */
-                    if (gpiod_line_config_add_line_settings(output_line_cfg, &offset, 1, output_settings) < 0) {
-                        syslog(LOG_ERR, "GPIO: Failed to add line settings for pin %u: %m", offset);
+                    /* Create a new line config object */
+                    output_line_cfg = gpiod_line_config_new();
+                    if (!output_line_cfg) {
+                        syslog(LOG_ERR, "GPIO: Failed to allocate line config");
                         exit_code = EXIT_FAILURE;
                     } else {
-                        /* Create a new request config object */
-                        req_cfg = gpiod_request_config_new();
-                        if (!req_cfg) {
-                            syslog(LOG_ERR, "GPIO: Failed to allocate request config");
+                        unsigned int offset = SOFT_PIN;
+
+                        /* Based on line settings of the pin for the direction and output,
+                        * of the line configuration; apply it to the array of offsets,
+                        * in this case SOFT_PIN
+                        */
+                        if (gpiod_line_config_add_line_settings(output_line_cfg, &offset, 1, output_settings) < 0) {
+                            syslog(LOG_ERR, "GPIO: Failed to add line settings for pin %u: %m", offset);
                             exit_code = EXIT_FAILURE;
                         } else {
-                            /* Set the consumer name of the request */
-                            gpiod_request_config_set_consumer(req_cfg, "led-toggle");
-                            /* Request a set of lines for exclusive usage */
-                            request = gpiod_chip_request_lines(chip, req_cfg, output_line_cfg);
-                            if (!request) {
-                                syslog(LOG_ERR, "GPIO: Failed to request GPIO lines: %m");
+                            /* Create a new request config object */
+                            req_cfg = gpiod_request_config_new();
+                            if (!req_cfg) {
+                                syslog(LOG_ERR, "GPIO: Failed to allocate request config");
                                 exit_code = EXIT_FAILURE;
                             } else {
-                                gpiod_initialized = true;
+                                /* Set the consumer name of the request */
+                                gpiod_request_config_set_consumer(req_cfg, "led-toggle");
+                                /* Request a set of lines for exclusive usage */
+                                request = gpiod_chip_request_lines(chip, req_cfg, output_line_cfg);
+                                if (!request) {
+                                    syslog(LOG_ERR, "GPIO: Failed to request GPIO lines: %m");
+                                    exit_code = EXIT_FAILURE;
+                                } else {
+                                    gpiod_initialized = true;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 
-    /* Main logic */
-    if (gpiod_initialized == true)
-    {
-        /* Calculate end time and log it. */
-        end_time = start_time + (double)led_param.u32_duration_s;
+        /* Main logic */
+        if (gpiod_initialized == true)
+        {
+            /* Calculate end time and log it. */
+            end_time = start_time + (double)led_param.u32_duration_s;
 
-        syslog(LOG_INFO, "Start time and end duration time is: %.9f and %.9f.", start_time, end_time);
+            syslog(LOG_INFO, "Start time and end duration time is: %.9f and %.9f.", start_time, end_time);
 
-        /* Calculate periods */
-        led_param.u32_semi_period_us = (uint32_t)(led_param.u32_period_us / 2U);
-        led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
-        
-        /* Duty cycle for sysfs (nanoseconds) */
-        uint32_t period_ns = 1000000000U / led_param.u32_freq;
-        uint32_t duty_ns = period_ns / 2U;
+            /* Calculate periods */
+            led_param.u32_semi_period_us = (uint32_t)(led_param.u32_period_us / 2U);
+            led_param.u32_freq = BASIC_FREQUENCY_1HZ / led_param.u32_period_us;
+            
+            /* Duty cycle for sysfs (nanoseconds) */
+            uint32_t period_ns = 1000000000U / led_param.u32_freq;
+            uint32_t duty_ns = period_ns / 2U;
 
-        /* Summary running information */
-        if (led_param.b_relative_sleep == true) {
-            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
-                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "relative");
-            time_sleep_ptr = relative_sleep;
-        } else {
-            syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
-                led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "absolute");
-            time_sleep_ptr = absolute_sleep;
-        }
+            /* Summary running information */
+            if (led_param.b_relative_sleep == true) {
+                syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                    led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "relative");
+                time_sleep_ptr = relative_sleep;
+            } else {
+                syslog(LOG_INFO, "Semi-period: %d\nFrequency: %d\nDuration: %d\nPath:%s\n Toggle time:%s",
+                    led_param.u32_semi_period_us, led_param.u32_freq, led_param.u32_duration_s, output_path, "absolute");
+                time_sleep_ptr = absolute_sleep;
+            }
 
-        /* Hardware PWM (GPIO 18) via sysfs helper */
-        if (!pwm_init(period_ns, duty_ns)) {
-            syslog(LOG_ERR, "PWM: Failed to initialize PWM.");
-            exit_code = EXIT_FAILURE;
-        } else {
-            pwm_initialized = true;
-        }
-    }
-
-    if (gpiod_initialized && pwm_initialized) {
-        /* Initialize the baseline timestamp exactly ONCE before the loop */
-        clock_gettime(CLOCK_MONOTONIC, &next_wakeup);
-
-        /* Main toggle loop */
-        while ((keepRunning) && (current_time < end_time)) {
-            save_edge(&et, get_time_s(), 1);
-            gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_ACTIVE);
-            time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
-    
-            save_edge(&et, get_time_s(), 0);
-            gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_INACTIVE);
-            time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
-
-            /* Update time */
-            current_time = get_time_s();
-        }
-
-        /* Reconfigure pin to high-impedance input on exit */
-        input_settings = gpiod_line_settings_new();
-        input_line_cfg = gpiod_line_config_new();
-        if (input_settings && input_line_cfg) {
-            gpiod_line_settings_set_direction(input_settings, GPIOD_LINE_DIRECTION_INPUT);
-            unsigned int offset = SOFT_PIN;
-            if (gpiod_line_config_add_line_settings(input_line_cfg, &offset, 1, input_settings) == 0) {
-                gpiod_line_request_reconfigure_lines(request, input_line_cfg);
-                syslog(LOG_INFO, "GPIO: Reconfigured pin %u to input (high-impedance) on exit.", SOFT_PIN);
+            /* Hardware PWM (GPIO 18) via sysfs helper */
+            if (!pwm_init(period_ns, duty_ns)) {
+                syslog(LOG_ERR, "PWM: Failed to initialize PWM.");
+                exit_code = EXIT_FAILURE;
+            } else {
+                pwm_initialized = true;
             }
         }
 
-        /* Free gpiod objects */
-        if (input_settings) gpiod_line_settings_free(input_settings);
-        if (input_line_cfg) gpiod_line_config_free(input_line_cfg);
+        if (gpiod_initialized && pwm_initialized) {
+            /* Initialize the baseline timestamp exactly ONCE before the loop */
+            clock_gettime(CLOCK_MONOTONIC, &next_wakeup);
 
-        /* Turn off PWM */
-        pwm_disable();
+            /* Main toggle loop */
+            while ((keepRunning) && (current_time < end_time)) {
+                struct timespec ts_before, ts_after;
+                
+                save_edge(&et, get_time_s(), 1);
+                gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_ACTIVE);
+                
+                clock_gettime(CLOCK_MONOTONIC, &ts_before);
+                time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
+                clock_gettime(CLOCK_MONOTONIC, &ts_after);
 
-        /* Save edges timestamp */
-        finalize_and_save_logs(&et, output_path);
-    
-        /* Notify about shutting down the service */
-        syslog(LOG_INFO, "Service shutting down.");
+                int64_t actual_ns = (int64_t)(ts_after.tv_sec - ts_before.tv_sec) * 1000000000LL + (ts_after.tv_nsec - ts_before.tv_nsec);
+                int64_t expected_ns = (int64_t)led_param.u32_semi_period_us * 1000LL;
+                int64_t jitter_ns = actual_ns - expected_ns;
+                
+                if (jitter_ns < jstats.min_jitter_ns) jstats.min_jitter_ns = jitter_ns;
+                if (jitter_ns > jstats.max_jitter_ns) jstats.max_jitter_ns = jitter_ns;
+                jstats.sum_jitter_ns += jitter_ns;
+                jstats.sum_sq_jitter_ns += (uint64_t)(jitter_ns * jitter_ns);
+                jstats.count++;
+
+                save_edge(&et, get_time_s(), 0);
+                gpiod_line_request_set_value(request, SOFT_PIN, GPIOD_LINE_VALUE_INACTIVE);
+                
+                clock_gettime(CLOCK_MONOTONIC, &ts_before);
+                time_sleep_ptr(led_param.u32_semi_period_us, &next_wakeup);
+                clock_gettime(CLOCK_MONOTONIC, &ts_after);
+
+                actual_ns = (int64_t)(ts_after.tv_sec - ts_before.tv_sec) * 1000000000LL + (ts_after.tv_nsec - ts_before.tv_nsec);
+                jitter_ns = actual_ns - expected_ns;
+                
+                if (jitter_ns < jstats.min_jitter_ns) jstats.min_jitter_ns = jitter_ns;
+                if (jitter_ns > jstats.max_jitter_ns) jstats.max_jitter_ns = jitter_ns;
+                jstats.sum_jitter_ns += jitter_ns;
+                jstats.sum_sq_jitter_ns += (uint64_t)(jitter_ns * jitter_ns);
+                jstats.count++;
+
+                /* Update time */
+                current_time = get_time_s();
+            }
+
+            /* Reconfigure pin to high-impedance input on exit */
+            input_settings = gpiod_line_settings_new();
+            input_line_cfg = gpiod_line_config_new();
+            if (input_settings && input_line_cfg) {
+                gpiod_line_settings_set_direction(input_settings, GPIOD_LINE_DIRECTION_INPUT);
+                unsigned int offset = SOFT_PIN;
+                if (gpiod_line_config_add_line_settings(input_line_cfg, &offset, 1, input_settings) == 0) {
+                    gpiod_line_request_reconfigure_lines(request, input_line_cfg);
+                    syslog(LOG_INFO, "GPIO: Reconfigured pin %u to input (high-impedance) on exit.", SOFT_PIN);
+                }
+            }
+
+            /* Free gpiod objects */
+            if (input_settings) gpiod_line_settings_free(input_settings);
+            if (input_line_cfg) gpiod_line_config_free(input_line_cfg);
+
+            /* Turn off PWM */
+            pwm_disable();
+
+            /* Save edges timestamp */
+            finalize_and_save_logs(&et, output_path);
+            
+            if (jstats.count > 0) {
+                double avg_jitter = (double)jstats.sum_jitter_ns / jstats.count;
+                syslog(LOG_INFO, "Jitter Stats: count=%u, min=%ld ns, max=%ld ns, avg=%.2f ns",
+                    jstats.count, jstats.min_jitter_ns, jstats.max_jitter_ns, avg_jitter);
+            }
+        
+            /* Notify about shutting down the service */
+            syslog(LOG_INFO, "Service shutting down.");
+        }
+
+        /* Cleanup libgpiod resources */
+        if (request) gpiod_line_request_release(request);
+        if (req_cfg) gpiod_request_config_free(req_cfg);
+        if (output_line_cfg) gpiod_line_config_free(output_line_cfg);
+        if (output_settings) gpiod_line_settings_free(output_settings);
+        if (chip) gpiod_chip_close(chip);
+
+        /* Close system logger */
+        closelog();
     }
-
-    /* Cleanup libgpiod resources */
-    if (request) gpiod_line_request_release(request);
-    if (req_cfg) gpiod_request_config_free(req_cfg);
-    if (output_line_cfg) gpiod_line_config_free(output_line_cfg);
-    if (output_settings) gpiod_line_settings_free(output_settings);
-    if (chip) gpiod_chip_close(chip);
-
-    /* Close system logger */
-    closelog();
 
     return exit_code;
 }

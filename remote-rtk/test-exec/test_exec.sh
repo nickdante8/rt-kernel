@@ -148,7 +148,8 @@ test_start() {
     local load_type="$1"
 
     # Variable calculations
-    local cyclictest_interval=$(($NOMINAL_PERIOD_US / 2))
+    # Calculate cyclictest interval: semi-period minus 3% offset to break phase-locking
+    local cyclictest_interval=$(( (NOMINAL_PERIOD_US / 2) * 97 / 100 ))
     # Update it for all load types
     local cyclictest_hist=1000
 
@@ -175,7 +176,7 @@ test_start() {
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_USB}" ]]; then
         # fio USB load
-        sudo fio --name=${load_type} --filename=/dev/sda --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
             --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
             --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
@@ -186,7 +187,7 @@ test_start() {
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_NET_USB}" ]]; then
         # fio USB load
-        sudo fio --name=${load_type} --filename=/dev/sda --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
             --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
             --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
@@ -200,7 +201,7 @@ test_start() {
         timing_measurement "start" "${cyclictest_interval}" "${cyclictest_hist}"
     elif [[ "${load_type}" == "${LOAD_TYPE_FULL}" ]]; then
         # fio USB load
-        sudo fio --name=${load_type} --filename=/dev/sda --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
+        sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
             --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
             --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
