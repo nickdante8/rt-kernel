@@ -48,15 +48,16 @@ sudo apt-get update && sudo apt-get install -y \
 
 ## 2. Kernel Configuration (`configure.sh`)
 
-The script initializes the default config using `make defconfig` (unified configuration for ARM64) and programmatically edits configurations using the kernel's `scripts/config` utility.
+The script programmatically edits kernel configurations using the kernel's `scripts/config` utility, applying real-time settings and optional driver stripping.
 
-### Platform Hardening (BCM2837 / Cortex-A53)
-To reduce compilation times, kernel memory overhead, and interrupt context-switching delay, non-target hardware support is stripped:
-* **Core Count Lock**: Configures `CONFIG_NR_CPUS=4` to match the physical core layout of the Broadcom BCM2837.
-* **Address Bit Sizing**: Configures `CONFIG_ARM64_VA_BITS=48` and `CONFIG_ARM64_PA_BITS=48` for Cortex-A53 address translation.
-* **Architecture Stripping**: Disables all non-Broadcom system-on-chip architectures (e.g. `CONFIG_ARCH_QCOM`, `CONFIG_ARCH_SUNXI`, `CONFIG_ARCH_ROCKCHIP`) and non-essential Broadcom families (e.g. `CONFIG_ARCH_BRCMSTB` for set-top boxes, `CONFIG_ARCH_BCM_IPROC`).
-* **Clock Driver Stripping**: Disables enterprise-level clocks like `CONFIG_CLK_BCM_63XX` and `CONFIG_COMMON_CLK_IPROC`.
-* **Built-in Drivers**: Forces the SMSC/Microchip Ethernet driver (`CONFIG_USB_LAN78XX=y`) to be built-in to the kernel image. This eliminates the dependency on an initial RAM disk (initramfs) for mounting network filesystems on boot.
+### Platform Configuration and Build Stability
+Initially, the configuration framework attempted aggressive, platform-specific manual stripping (disabling other SoC architectures like Qualcomm or Rockchip, disabling enterprise-level clock drivers, and locking core counts). However, in modern kernels (v6.18+), these manual deletions broke deep driver dependencies, causing compilation stalls and unresolved link errors during the final dependency resolution phase (`make olddefconfig`).
+
+To guarantee absolute build stability, the manual platform stripping functions were removed from `configure.sh`. Instead, the build system relies on official, battle-tested configuration templates provided in the Raspberry Pi kernel source tree:
+* **Baseline Defconfig**: `bcm2711_defconfig` (the official downstream unified 64-bit config supporting Pi 3B+, Pi 4, and other Broadcom architectures).
+* **Real-Time Defconfig**: `bcm2711_rt_defconfig` (the official downstream config containing the necessary real-time and preemption structure changes).
+
+Using these base configurations ensures that all clock drivers, architecture dependencies, and essential platform drivers are correctly linked and compile out-of-the-box.
 
 ### Baseline vs. Real-Time (RT) Configuration
 
