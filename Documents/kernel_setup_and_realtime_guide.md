@@ -119,11 +119,11 @@ The script installs a helper script on the Pi at `/usr/local/bin/switch-kernel.s
 When deploying or updating boot parameters, `install.sh` generates a custom `cmdline.txt` inside the kernel's isolated prefix directory. This configuration is dynamically evaluated using environment variables in `config.env`, decoupling CPU scheduling and latency settings:
 
 ### Core Isolation & Tickless Settings (Enabled via `ENABLE_ISOLATION=true`)
-To isolate CPU Cores 2 and 3 and reserve them exclusively for real-time applications (such as our `led-toggle` C daemon), set `ENABLE_ISOLATION=true` in `config.env`. The deployment script will append the following parameters to the kernel command line:
-* `isolcpus=2,3`: Instructs the scheduler to never allocate general user-space processes or threads to Cores 2 and 3.
-* `rcu_nocbs=2,3`: Offloads RCU (Read-Copy-Update) callback processing from Cores 2 and 3 to Cores 0 and 1.
-* `nohz_full=2,3`: Places Cores 2 and 3 in adaptive tickless mode. If only a single thread runs on an isolated core, the periodic system timer interrupt is disabled, eliminating a major source of scheduling jitter.
-* `irqaffinity=0,1`: Directs all default hardware interrupt handlers to execute on Core 0 or Core 1, protecting the real-time cores (2 and 3) from hardware interrupt overhead.
+To strictly isolate CPU Core 3 and reserve it exclusively for real-time applications (such as our `led-toggle` C daemon), set `ENABLE_ISOLATION=true` in `config.env`. The deployment script will append the following parameters to the kernel command line:
+* `isolcpus=3`: Instructs the scheduler to never allocate general user-space processes or threads to Core 3.
+* `rcu_nocbs=3`: Offloads RCU (Read-Copy-Update) callback processing from Core 3 to the other available cores.
+* `nohz_full=3`: Places Core 3 in adaptive tickless mode. If only a single thread runs on an isolated core, the periodic system timer interrupt is disabled, eliminating a major source of scheduling jitter.
+* `irqaffinity=0,1,2`: Directs all default hardware interrupt handlers to execute on Cores 0, 1, or 2, protecting the real-time core (3) from hardware interrupt overhead.
 
 ### Interrupt Affinity & FIQ Disabling (Enabled via `ENABLE_RT=true`)
 Real-time latency constraints require turning off legacy Raspberry Pi hardware engines that conflict with deterministic scheduling. When `ENABLE_RT=true`, the following settings are appended:
@@ -135,26 +135,26 @@ Real-time latency constraints require turning off legacy Raspberry Pi hardware e
 
 ## 5. IRQ Offloading & Network Steering Helper
 
-While `irqaffinity=0,1` in `cmdline.txt` suggests to the kernel to relocate standard interrupts, it does not completely prevent network packets, hardware interrupts, or driver workers from running on isolated Cores 2 and 3. To enforce strict determinism, the system installs an offloading daemon `/usr/local/bin/pin-usb-irq.sh` on the Pi.
+While `irqaffinity=0,1,2` in `cmdline.txt` suggests to the kernel to relocate standard interrupts, it does not completely prevent network packets, hardware interrupts, or driver workers from running on the strictly isolated Core 3. To enforce absolute determinism, the system installs an offloading daemon `/usr/local/bin/pin-usb-irq.sh` on the Pi.
 
-This script performs three distinct levels of offloading to shield Cores 2 and 3 from interrupt and network overhead:
+This script performs three distinct levels of offloading to distribute load across Cores 0, 1, and 2, completely shielding Core 3 from interrupt and network overhead:
 
 ### 1. Software Network Stack Offloading (Receive Packet Steering - RPS)
 When network packets arrive, they generate hardware interrupts, which are followed by software interrupt processing (softirqs) to run the TCP/IP stack. 
 * The script writes mask `2` (binary `0010` -> CPU1) to `/sys/class/net/eth0/queues/rx-0/rps_cpus`.
-* This forces all software-level network stack packet processing (RPS) to run exclusively on CPU1, shielding both CPU0 and the isolated Cores 2/3.
+* This forces all software-level network stack packet processing (RPS) to run exclusively on CPU1, shielding CPU0 (which handles HW IRQs), CPU2, and the isolated Core 3.
 
 ### 2. Hardware USB/Ethernet Interrupt Routing
 * The script finds the active hardware IRQ number for the USB controller (`dwc_otg` or `dwc2`).
-* It writes mask `3` (binary `0011` -> CPU0 & CPU1) to `/proc/irq/<IRQ>/smp_affinity`.
-* This restricts the hardware USB/Ethernet interrupts from executing on Cores 2 and 3, keeping them strictly on the non-isolated CPU0 and CPU1.
-* *Note:* Because some kernel configurations or hardware versions of the BCM2837/dwc2 do not support redirecting the USB hardware interrupt away from Core 0, the script catches write errors (`2>/dev/null`) and logs a warning instead of failing the startup.
+* It writes mask `1` (binary `0001` -> CPU0) to `/proc/irq/<IRQ>/smp_affinity`.
+* This strictly restricts the hardware USB/Ethernet interrupts to CPU0, distributing the hardware load away from the RPS worker (CPU1) and IRQ threads (CPU2), whilst keeping the real-time core (CPU3) entirely free.
+* *Note:* Because some kernel configurations or hardware versions of the BCM2837/dwc2 do not support redirecting the USB hardware interrupt away from Core 0, forcing it to CPU0 inherently bypasses this limitation.
 
 ### 3. Threaded IRQ Workers Pinning
 On a `PREEMPT_RT` kernel (or baseline booted with the `threadirqs` command-line option), the kernel runs hardware interrupt handlers inside dedicated kernel threads (named `irq/[IRQ]-...`). 
 * The script searches for these threads using `pgrep -f 'irq/[0-9]+-'`.
-* It uses `taskset -cp 1` to pin them to CPU1 (Core index 1).
-* This prevents interrupt handling threads from migrating to or executing on the isolated Cores 2 and 3.
+* It uses `taskset -cp 2` to pin them specifically to CPU2 (Core index 2).
+* This strictly isolates interrupt handling threads to their own core (CPU2), completely preventing them from migrating to the real-time isolated Core 3 or conflicting with RPS (CPU1) and HW IRQs (CPU0).
 
 ```bash
 #!/bin/bash
@@ -175,12 +175,12 @@ else
     echo "Notice: eth0 RPS queue not found"
 fi
 
-# 2. Set USB/Ethernet hardware IRQ affinity to CPU0/CPU1 (mask 3 = CPU0 & CPU1)
+# 2. Set USB/Ethernet hardware IRQ affinity to CPU0 only (mask 1)
 IRQ=$(grep -E 'dwc2|dwc_otg' /proc/interrupts | awk '{print $1}' | tr -d ':')
 if [ -n "$IRQ" ]; then
-    # 3 is the hex bitmask for CPU0 & CPU1 (0b0011)
-    if echo 3 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
-        echo "Set USB/Eth IRQ $IRQ smp_affinity to CPU0/CPU1 (mask 3)"
+    # 1 is the hex bitmask for CPU0 (0b0001)
+    if echo 1 2>/dev/null > /proc/irq/$IRQ/smp_affinity; then
+        echo "Set USB/Eth IRQ $IRQ smp_affinity to CPU0 (mask 1)"
     else
         echo "WARNING: Failed to set smp_affinity for USB/Eth IRQ $IRQ (this is a hardware limitation on BCM2837/dwc2)"
     fi
@@ -188,16 +188,17 @@ else
     echo "Could not find dwc2/dwc_otg IRQ"
 fi
 
-# 3. Pin all threaded IRQ threads to CPU1 (CPU index 1)
+# 3. Pin all threaded IRQ threads to CPU2 (CPU index 2)
+# These threads exist on RT kernels (or baseline booted with threadirqs)
 PINNED_COUNT=0
 for pid in $(pgrep -f 'irq/[0-9]+-'); do
-    if taskset -cp 1 "$pid" >/dev/null 2>&1; then
+    if taskset -cp 2 "$pid" >/dev/null 2>&1; then
         PINNED_COUNT=$((PINNED_COUNT + 1))
     fi
 done
 
 if [ "$PINNED_COUNT" -gt 0 ]; then
-    echo "Successfully pinned $PINNED_COUNT threaded IRQ workers to CPU1"
+    echo "Successfully pinned $PINNED_COUNT threaded IRQ workers to CPU2"
 else
     echo "Notice: No threaded IRQ workers found to pin (running standard baseline kernel?)"
 fi

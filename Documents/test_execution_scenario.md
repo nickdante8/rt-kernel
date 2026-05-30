@@ -50,6 +50,12 @@ if (input_settings && input_cfg) {
 }
 ```
 
+### Real-Time Execution Environment Hardening
+To prevent scheduling delays caused by OS memory management or generic task scheduling, `led-toggle` actively hardens its own execution context on startup:
+1. **Memory Paging Lock (`mlockall`)**: It locks all current and future virtual memory pages into physical RAM. If this fails, the process immediately exits, as relying on swapped or compressed (ZRAM) pages guarantees massive real-time jitter.
+2. **Strict CPU Affinity (`sched_setaffinity`)**: The daemon binds itself exclusively to the isolated **CPU 3** (`CPU_SET(3, &cpuset)`), keeping it entirely segregated from software RPS handling and generic hardware interrupts.
+3. **FIFO Scheduling (`sched_setscheduler`)**: It elevates itself to the `SCHED_FIFO` real-time class at priority `99`, ensuring it preempts any other user-space processes that might wander onto Core 3.
+
 ---
 
 ## 2. Jitter & Drift Performance Summary
@@ -76,17 +82,20 @@ We deploy standard real-time profiling utilities on the target system:
 * **`iperf3`**: Generates high-throughput TCP/IP network traffic to stress the shared USB/Ethernet bus.
 * **`fio`**: Conducts continuous raw disk read/write block operations to stress the USB mass storage interface.
 
+### Background Load Service Prioritization
+Crucially, the `test-exec.service` which manages the execution of stress tools is explicitly configured to run as `CPUSchedulingPolicy=other` and `CPUSchedulingPriority=0` (the default, unprivileged Linux scheduler class). If the stress injection tools were allowed to run at `SCHED_FIFO` or `SCHED_RR`, they would compete with the real-time `led-toggle` daemon and destroy temporal determinism.
+
 ### Upgraded Multi-Thread Jitter Profiling (`-t4`)
 Originally, the benchmark execution script (`test_exec.sh`) executed a single-threaded cyclictest instance pinned to a single core (`-a 0 -t1`). This configuration hid the latency distribution across the other CPU cores, making it impossible to evaluate core isolation effects.
 
-The instrumentation suite was upgraded to **4-thread CPU-wide profiling (`-t4`)** to monitor scheduling jitter across all 4 cores simultaneously. In addition, the histogram depth was increased to **`-h1000`** to capture scheduling outliers and Worst-Case Execution Time (WCET) delays up to 1000 microseconds (1ms).
+The instrumentation suite was upgraded to **4-thread CPU-wide profiling (`-t4`)** to monitor scheduling jitter across all 4 cores simultaneously. In addition, the histogram depth was increased to **`-h1000`** to capture scheduling outliers and Worst-Case Execution Time (WCET) delays up to 1000 microseconds (1ms). Finally, to prevent test phase-locking (where `cyclictest` and `led-toggle` inadvertently fall into a synchronized cadence), the benchmark calculates the measurement interval dynamically by subtracting a 3% offset from the nominal toggle semi-period.
 
 ### Synthesized Load Profiles
 The test framework supports six distinct load scenarios to isolate scheduling and hardware bottlenecks:
 1. **Idle (`idle`)**: Runs the measurement daemon without external stress to capture the baseline jitter under clean conditions.
 2. **CPU Stress (`load-cpu`)**: Launches `chrt -o 0 nice -n 19 stress-ng --cpu 4` to saturate all CPU cores with compute-heavy, idle-priority loops, verifying the kernel's scheduler preemption hierarchy.
 3. **Network Stress (`load-net`)**: Runs an `iperf3` client to saturate the LAN7515 bus with packet processing interrupts.
-4. **Storage Stress (`load-usb`)**: Launches `fio` random read/write blocks on a USB storage drive to saturate the USB host controller bus.
+4. **Storage Stress (`load-usb`)**: Launches `fio` random read/write blocks on a USB storage drive to saturate the USB host controller bus. The test specifically caps file generation (`--size=100M`) to prevent disk exhaustion over lengthy capture periods.
 5. **Network + Storage Stress (`load-net-usb`)**: Combines `iperf3` and `fio` execution to stress the shared USB 2.0 downstream bus.
 6. **Full Synthetic Stress (`load-full`)**: Executes a combined storm of CPU stress (`stress-ng --cpu 4`), memory pressure (`stress-ng --vm 2 --vm-bytes 50%` with nice 19), disk block I/O (`fio`), and network traffic (`iperf3`). This represents the ultimate stress vector to test worst-case scheduling latencies.
 
