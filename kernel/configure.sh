@@ -70,65 +70,34 @@ argument_parse() {
     done
 }
 
-# Platform configuration
-config_3_b_plus_platform() {
-    echo "-> Hardening platform for RPi 3B+ (BCM2837 / Cortex-A53)..."
+# Add platform specific configurations
+config_platform_specific() {
+    echo "-> Platform specific configurations..."
 
-    # =====================================================================
-    # 1. CRITICAL: CPU & Memory sizing
-    # =====================================================================
-    # Pi 3B+ has exactly 4 cores
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val NR_CPUS 4
+    # PREEMPT_RT and specific Baseline settings
+    if [ "${ENABLE_RT}" = "true" ]; then
+        echo "-> Configuring for RT (Real-Time)..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT_RT
 
-    # Cortex-A53 supports 48-bit VA / 48-bit PA maximum
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val ARM64_VA_BITS 48
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val ARM64_PA_BITS 48
-
-    # =====================================================================
-    # 2. RECOMMENDED: Strip non-BCM architectures
-    # =====================================================================
-    # Keep ONLY Broadcom / BCM2835 platform support
-    for arch in ACTIONS AIROHA SUNXI ALPINE APPLE ARTPEC AXIADO BERLIN \
-                BLAIZE CIX EXYNOS K3 LG1K HISI KEEMBAY MEDIATEK MESON \
-                MICROCHIP SPARX5 MVEBU NXP LAYERSCAPE MXC S32 MA35 NPCM \
-                QCOM REALTEK RENESAS ROCKCHIP SEATTLE INTEL_SOCFPGA SOPHGO \
-                STM32 SYNQUACER TEGRA TESLA_FSD SPRD THUNDER THUNDER2 \
-                UNIPHIER VEXPRESS VISCONTI XGENE ZYNQMP; do
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable "ARCH_${arch}"
-    done
-
-    # Also disable non-Pi Broadcom platforms
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BCM_IPROC
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BCMBCA
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable ARCH_BRCMSTB
-
-    # =====================================================================
-    # 3. Ensure critical Pi 3B+ drivers are built-in
-    # =====================================================================
-    # Ethernet - built-in for faster boot (no initramfs dependency)
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_LAN78XX
-    
-    # Enable FTRACE for latency analysis (cyclictest --breaktrace)
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable FTRACE
-    
-    # Ensure VC4 GPU driver is available (for HDMI output)
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable DRM_VC4
-
-    # =====================================================================
-    # 4. Strip Pi 4/5 specific configs
-    # =====================================================================
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PINCTRL_BCM2712
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable BCM2712_MIP
-
-    # Strip enterprise Broadcom clock drivers
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_63XX
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_NS2
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CLK_BCM_SR
-    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable COMMON_CLK_IPROC
-
-    # (Note: DEBUG_INFO is explicitly retained)
-
-    echo "✓ Platform hardened for RPi 3B+."
+        # Timer frequency 1000 Hz for RT
+        echo "-> Setting timer frequency to 1000 Hz..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_1000
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_250
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 1000
+    else
+        echo "-> Configuring for Baseline (Non-RT)..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_RT
+                
+        # Timer frequency 250 Hz for baseline (Standard trade-off for performance/power)
+        echo "-> Setting timer frequency to 250 Hz..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_250
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_1000
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 250
+    fi
 }
 
 # Kernel configuration
@@ -151,50 +120,7 @@ config_kernel() {
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HIGH_RES_TIMERS
 
     # Harden the config for the specific target platform
-    config_3_b_plus_platform
-
-    # PREEMPT_RT and specific Baseline settings
-    if [ "${ENABLE_RT}" = "true" ]; then
-        echo "-> Configuring for RT (Real-Time)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT_RT
-        
-        # Disable standard/conflicting preempt models
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_NONE
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_VOLUNTARY
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT
-        
-        # Timer frequency 1000 Hz for RT
-        echo "-> Setting timer frequency to 1000 Hz..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_1000
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_250
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 1000
-        
-        # RCU no-callbacks configuration (often used for isolating cores in RT)
-        echo "-> Enabling RCU no-callback support (RCU_NOCB_CPU)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable RCU_NOCB_CPU
-    else
-        echo "-> Configuring for Baseline (Non-RT)..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_RT
-        
-        # Enable standard preempt (Typical default for Raspberry Pi desktop/baseline)
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PREEMPT
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_NONE
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable PREEMPT_VOLUNTARY
-        
-        # Timer frequency 250 Hz for baseline (Standard trade-off for performance/power)
-        echo "-> Setting timer frequency to 250 Hz..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HZ_250
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_100
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_300
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable HZ_1000
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --set-val HZ 250
-        
-        # Disable RCU no-callbacks for standard baseline behavior
-        echo "-> Disabling RCU no-callback support..."
-        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable RCU_NOCB_CPU
-    fi
+    config_platform_specific
 
     # Localversion Suffix
     if [ -n "${LOCALVERSION}" ]; then
