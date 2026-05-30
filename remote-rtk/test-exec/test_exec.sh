@@ -280,6 +280,12 @@ main() {
     # Temporary
     cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"
 $(date +%Y-%m-%d-%H:%M:%S.%N)
+
+# Save kernel version
+$(uname -a)
+
+# Boot options
+$(tail -n 3 /boot/firmware/config.txt)
 EOF
 
     # Start testing. Initialize all tooling
