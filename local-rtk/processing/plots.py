@@ -391,7 +391,7 @@ def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=
     # The number of bins can be adjusted. 'auto' is a good starting point.
     if label == None:
         label='Workload Active IRQs'
-    data.plot(kind='bar', stacked=True, ax=ax, edgecolor='black', width=0.5, alpha=0.85)
+    data.plot(kind='bar', stacked=True, ax=ax, edgecolor='black', width=0.5, alpha=0.85, colormap='tab20')
 
     # --- Calculate Statistics for the Summary Box ---
     total_interrupts = data.values.sum()
@@ -430,7 +430,7 @@ def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=
     ax.set_xlabel('Processor Cores', fontsize=12)
     ax.set_ylabel('Interrupt Count (Delta Volume)', fontsize=12)
     ax.grid(True, linestyle='--', alpha=0.5)
-    ax.legend(title="Interrupt Vector", bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=9)
+    ax.legend(title="Interrupt Vector", bbox_to_anchor=(1.01, 1), loc='upper left', fontsize=9)
 
     # Force horizontal labels on the X-axis (CPU0, CPU1...) instead of angled text
     plt.xticks(rotation=0) 
@@ -445,8 +445,8 @@ def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=
         f"Unique Active IRQ Vectors: {len(data.columns)}"
     )
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=10,
-            verticalalignment='top', bbox=props)
+    ax.text(1.01, 0.48, stats_text, transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', horizontalalignment='left', bbox=props)
 
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -462,8 +462,14 @@ def plot_vmstat_cpu(data, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
+    avg_usr = np.mean(data['usr']) if len(data['usr']) > 0 else 0
+    avg_sys = np.mean(data['sys']) if len(data['sys']) > 0 else 0
+    avg_wa = np.mean(data['wa']) if len(data['wa']) > 0 else 0
+    avg_idle = np.mean(data['idle']) if len(data['idle']) > 0 else 0
+    labels = [f'User ({avg_usr:.1f}%)', f'System ({avg_sys:.1f}%)', f'IO Wait ({avg_wa:.1f}%)', f'Idle ({avg_idle:.1f}%)']
+
     ax.stackplot(data['timestamps'], data['usr'], data['sys'], data['wa'], data['idle'],
-                 labels=['User', 'System', 'IO Wait', 'Idle'],
+                 labels=labels,
                  colors=['#2ca02c', '#1f77b4', '#d62728', '#e377c2'], alpha=0.8)
 
     ax.set_title(title if title else "CPU Breakdown Over Time", fontsize=16)
@@ -489,10 +495,10 @@ def plot_vmstat_system_activity(data, output_file, title=None, show=False):
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
 
-    ax1.plot(data['timestamps'], data['context_switches'], color='blue', alpha=0.8, label='Context Switches')
-    ax2.plot(data['timestamps'], data['interrupts'], color='red', alpha=0.8, label='System Interrupts')
+    ax1.plot(data['timestamps'], data['context_switches'], color='blue', alpha=0.7, label='Total System Context Switches', linewidth=2)
+    ax2.plot(data['timestamps'], data['interrupts'], color='red', alpha=0.7, label='Total System Interrupts', linewidth=2)
 
-    ax1.set_title(title if title else "System Activity (vmstat)", fontsize=16)
+    ax1.set_title(title if title else "Total System Activity (vmstat)", fontsize=16)
     ax1.set_xlabel('Time', fontsize=12)
     ax1.set_ylabel('Context Switches / sec', color='blue', fontsize=12)
     ax2.set_ylabel('Interrupts / sec', color='red', fontsize=12)
@@ -543,7 +549,9 @@ def plot_pid_cpu(data, output_file, title=None, show=False):
 
     for cmd, cpu_array in data.pid_cpu.items():
         min_len = min(len(data.timestamps), len(cpu_array))
-        ax.plot(data.timestamps[:min_len], cpu_array[:min_len], marker='.', label=f'{cmd} CPU%')
+        if min_len > 0:
+            avg_cpu = np.mean(cpu_array[:min_len])
+            ax.plot(data.timestamps[:min_len], cpu_array[:min_len], marker='.', label=f'{cmd} (Avg: {avg_cpu:.1f}%)')
 
     ax.set_title(title if title else "Process CPU Usage", fontsize=16)
     ax.set_xlabel('Time', fontsize=12)
@@ -554,7 +562,7 @@ def plot_pid_cpu(data, output_file, title=None, show=False):
         ax.set_xticks(xticks_idx)
         ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"pidstat CPU plot saved to '{output_file}'")
@@ -569,12 +577,16 @@ def plot_pid_cswch(data, output_file, title=None, show=False):
     colors = plt.cm.tab10(np.linspace(0, 1, len(data.pid_cswch)))
     for idx, (cmd, cswch_array) in enumerate(data.pid_cswch.items()):
         min_len = min(len(data.timestamps), len(cswch_array))
-        ax.plot(data.timestamps[:min_len], cswch_array[:min_len], marker='.', color=colors[idx], label=f'{cmd} (Voluntary)')
+        if min_len > 0:
+            avg_cswch = np.mean(cswch_array[:min_len])
+            ax.plot(data.timestamps[:min_len], cswch_array[:min_len], marker='.', color=colors[idx], label=f'{cmd} Vol (Avg: {avg_cswch:.1f}/s)')
         
         nvcswch_array = data.pid_nvcswch.get(cmd, [])
         if len(nvcswch_array) > 0:
             min_len_nv = min(len(data.timestamps), len(nvcswch_array))
-            ax.plot(data.timestamps[:min_len_nv], nvcswch_array[:min_len_nv], marker='x', linestyle='--', color=colors[idx], label=f'{cmd} (Non-Voluntary)')
+            if min_len_nv > 0:
+                avg_nvcswch = np.mean(nvcswch_array[:min_len_nv])
+                ax.plot(data.timestamps[:min_len_nv], nvcswch_array[:min_len_nv], marker='x', linestyle='--', color=colors[idx], label=f'{cmd} Non-Vol (Avg: {avg_nvcswch:.1f}/s)')
 
     ax.set_title(title if title else "Process Context Switches", fontsize=16)
     ax.set_xlabel('Time', fontsize=12)
@@ -585,7 +597,7 @@ def plot_pid_cswch(data, output_file, title=None, show=False):
         ax.set_xticks(xticks_idx)
         ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"pidstat CS plot saved to '{output_file}'")
@@ -607,9 +619,25 @@ def plot_network_throughput(data, output_file, title=None, show=False):
     ax1.set_ylabel('Throughput (Mbps)', color='blue', fontsize=12)
     ax2.set_ylabel('Retransmits', color='red', fontsize=12)
     
+    # Scale Y axis to keep retransmits below throughput
+    max_bps = np.max(bps) if len(bps) > 0 else 100
+    ax1.set_ylim(bottom=0, top=max_bps * 1.5)
+    max_retransmits = np.max(data.retransmits) if len(data.retransmits) > 0 else 0
+    ax2.set_ylim(bottom=0, top=max(10, max_retransmits * 4))
+    
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    if len(bps) > 0:
+        stats_text = (
+            f"Avg Throughput: {np.mean(bps):.1f} Mbps\n"
+            f"Min Throughput: {np.min(bps):.1f} Mbps\n"
+            f"Max Throughput: {np.max(bps):.1f} Mbps\n"
+            f"Total Retransmits: {np.sum(data.retransmits)}"
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax1.text(0.98, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', horizontalalignment='right', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -622,38 +650,195 @@ def plot_fio_hist(data, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
-    # Latencies in fio logs are in nanoseconds. Convert to microseconds.
-    clat_us = np.array(data.clat_ns) / 1000.0
-
-    ax.hist(clat_us, bins='auto', density=True, color='purple', alpha=0.75, label='FIO Completion Latency')
-    
+    # Latencies in fio logs are in nanoseconds. Convert to milliseconds.
     if len(data.slat_ns) > 0:
-        slat_us = np.array(data.slat_ns) / 1000.0
-        ax.hist(slat_us, bins='auto', density=True, color='cyan', alpha=0.5, label='FIO Submission Latency')
+        slat_ms = np.array(data.slat_ns) / 1000000.0
+        ax.hist(slat_ms, bins='auto', density=True, color='#2196F3', alpha=0.5, label='FIO Submission Latency (slat)')
+        mean_sus = np.mean(slat_ms)
+        ax.axvline(mean_sus, color='#2196F3', linestyle='--', linewidth=2, label=f'Mean slat: {mean_sus:.2f} ms')
+        
+    if len(data.lat_ns) > 0:
+        lat_ms = np.array(data.lat_ns) / 1000000.0
+        ax.hist(lat_ms, bins='auto', density=True, color='#4CAF50', alpha=0.4, label='FIO Total Latency (lat)')
+        mean_lus = np.mean(lat_ms)
+        ax.axvline(mean_lus, color='#4CAF50', linestyle='--', linewidth=2, label=f'Mean lat: {mean_lus:.2f} ms')
 
-    if len(clat_us) > 0:
-        mean_us = np.mean(clat_us)
-        ax.axvline(mean_us, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_us:.2f} µs')
+    if len(data.clat_ns) > 0:
+        clat_ms = np.array(data.clat_ns) / 1000000.0
+        ax.hist(clat_ms, bins='auto', density=True, color='#FF5722', alpha=0.75, label='FIO Completion Latency (clat)')
+        mean_cus = np.mean(clat_ms)
+        ax.axvline(mean_cus, color='#FF5722', linestyle='--', linewidth=2, label=f'Mean clat: {mean_cus:.2f} ms')
 
     ax.set_title(title if title else "FIO Latency Distribution", fontsize=16)
-    ax.set_xlabel('Latency (µs)', fontsize=12)
+    ax.set_xlabel('Latency (ms)', fontsize=12)
     ax.set_ylabel('Probability Density', fontsize=12)
     ax.grid(True)
     ax.legend(loc='upper right')
 
-    if len(clat_us) > 0:
-        stats_text = (
-            f"Samples: {len(clat_us)}\n"
-            f"Min Latency: {np.min(clat_us):.2f} µs\n"
-            f"Max Latency: {np.max(clat_us):.2f} µs\n"
-            f"99th Percentile: {np.percentile(clat_us, 99):.2f} µs"
-        )
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+    stats_lines = []
+    if len(data.clat_ns) > 0:
+        clat_ms = np.array(data.clat_ns) / 1000000.0
+        stats_lines.append("--- Completion Latency (clat) ---")
+        stats_lines.append(f"Samples: {len(clat_ms)}")
+        stats_lines.append(f"Mean: {np.mean(clat_ms):.2f} ms")
+        stats_lines.append(f"Max: {np.max(clat_ms):.2f} ms")
+        stats_lines.append(f"99th: {np.percentile(clat_ms, 99):.2f} ms")
+        
+    if len(data.slat_ns) > 0:
+        slat_ms = np.array(data.slat_ns) / 1000000.0
+        stats_lines.append("\n--- Submission Latency (slat) ---")
+        stats_lines.append(f"Mean: {np.mean(slat_ms):.2f} ms")
+        stats_lines.append(f"Max: {np.max(slat_ms):.2f} ms")
+        stats_lines.append(f"99th: {np.percentile(slat_ms, 99):.2f} ms")
+    if len(data.lat_ns) > 0:
+        lat_ms = np.array(data.lat_ns) / 1000000.0
+        stats_lines.append("\n--- Total Latency (lat) ---")
+        stats_lines.append(f"Mean: {np.mean(lat_ms):.2f} ms")
+        stats_lines.append(f"Max: {np.max(lat_ms):.2f} ms")
+        stats_lines.append(f"99th: {np.percentile(lat_ms, 99):.2f} ms")
+
+    stats_text = "\n".join(stats_lines)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=9, verticalalignment='top', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"FIO histogram saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_fio_bandwidth(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+    has_data = False
+    if len(data.bw_timestamps_read) > 0 and len(data.bandwidth_read_kbps) > 0:
+        sort_idx = np.argsort(data.bw_timestamps_read)
+        ax1.plot(np.array(data.bw_timestamps_read)[sort_idx], 
+                 (np.array(data.bandwidth_read_kbps) / 1024.0)[sort_idx], 
+                 marker='.', linestyle='-', color='blue', label='Read Bandwidth', alpha=0.7)
+        ax1.set_ylabel('Read BW (MB/s)', fontsize=12)
+        ax1.grid(True)
+        ax1.legend(loc='upper right')
+        
+        read_mbps = np.array(data.bandwidth_read_kbps) / 1024.0
+        stats_text = f"Avg Read: {np.mean(read_mbps):.2f} MB/s\nMax Read: {np.max(read_mbps):.2f} MB/s"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        has_data = True
+        
+    if len(data.bw_timestamps_write) > 0 and len(data.bandwidth_write_kbps) > 0:
+        sort_idx = np.argsort(data.bw_timestamps_write)
+        ax2.plot(np.array(data.bw_timestamps_write)[sort_idx], 
+                 (np.array(data.bandwidth_write_kbps) / 1024.0)[sort_idx], 
+                 marker='.', linestyle='-', color='red', label='Write Bandwidth', alpha=0.7)
+        ax2.set_ylabel('Write BW (MB/s)', fontsize=12)
+        ax2.grid(True)
+        ax2.legend(loc='upper right')
+        
+        write_mbps = np.array(data.bandwidth_write_kbps) / 1024.0
+        stats_text = f"Avg Write: {np.mean(write_mbps):.2f} MB/s\nMax Write: {np.max(write_mbps):.2f} MB/s"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax2.text(0.02, 0.95, stats_text, transform=ax2.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        has_data = True
+
+    if has_data:
+        fig.suptitle(title if title else "FIO USB Bandwidth", fontsize=16)
+        ax2.set_xlabel('Time (s)', fontsize=12)
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"FIO bandwidth plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_fio_iops(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+
+    has_data = False
+    if len(data.iops_timestamps_read) > 0 and len(data.iops_read) > 0:
+        sort_idx = np.argsort(data.iops_timestamps_read)
+        ax1.plot(np.array(data.iops_timestamps_read)[sort_idx], 
+                 np.array(data.iops_read)[sort_idx], 
+                 marker='.', linestyle='-', color='blue', label='Read IOPS', alpha=0.7)
+        ax1.set_ylabel('Read IOPS', fontsize=12)
+        ax1.grid(True)
+        ax1.legend(loc='upper right')
+        
+        stats_text = f"Avg Read: {np.mean(data.iops_read):.1f}\nMax Read: {np.max(data.iops_read):.1f}"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        has_data = True
+        
+    if len(data.iops_timestamps_write) > 0 and len(data.iops_write) > 0:
+        sort_idx = np.argsort(data.iops_timestamps_write)
+        ax2.plot(np.array(data.iops_timestamps_write)[sort_idx], 
+                 np.array(data.iops_write)[sort_idx], 
+                 marker='.', linestyle='-', color='red', label='Write IOPS', alpha=0.7)
+        ax2.set_ylabel('Write IOPS', fontsize=12)
+        ax2.grid(True)
+        ax2.legend(loc='upper right')
+        
+        stats_text = f"Avg Write: {np.mean(data.iops_write):.1f}\nMax Write: {np.max(data.iops_write):.1f}"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax2.text(0.02, 0.95, stats_text, transform=ax2.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        has_data = True
+
+    if has_data:
+        fig.suptitle(title if title else "FIO USB IOPS", fontsize=16)
+        ax2.set_xlabel('Time (s)', fontsize=12)
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"FIO IOPS plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_mpstat_interrupts(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    if 'all' in data.cores:
+        core_all = data.cores['all']
+        interesting_irqs = ['51', '74', '180', 'IPI0', 'IPI1']
+        
+        irq_mapping = {
+            '51': '51 (dwc_otg_sim-fiq)',
+            '74': '74 (dwc_otg_hcd:usb1)',
+            '180': '180 (arch_timer)',
+            'IPI0': 'IPI0 (Rescheduling interrupts)',
+            'IPI1': 'IPI1 (Function call interrupts)',
+        }
+        
+        plotted = 0
+        for irq_name, values in core_all.individual_interrupts.items():
+            if any(interesting.lower() in irq_name.lower() for interesting in interesting_irqs) or np.mean(values) > 100:
+                avg_val = np.mean(values)
+                if avg_val > 0:
+                    # Get formatted name if available
+                    label_name = irq_mapping.get(irq_name.upper(), irq_name)
+                    ax.plot(core_all.timestamps, values, marker='.', label=f"{label_name} (Avg: {avg_val:.1f}/s)")
+                    plotted += 1
+
+        if plotted > 0:
+            ax.set_title(title if title else "Selected System Interrupts (mpstat)", fontsize=16)
+            ax.set_xlabel('Time', fontsize=12)
+            ax.set_ylabel('Interrupts / sec', fontsize=12)
+            
+            if len(core_all.timestamps) > 0:
+                xticks_idx = np.linspace(0, len(core_all.timestamps) - 1, min(10, len(core_all.timestamps)), dtype=int)
+                ax.set_xticks(xticks_idx)
+                ax.set_xticklabels([core_all.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
+
+            ax.legend(loc='best')
+            plt.tight_layout()
+            plt.savefig(output_file, dpi=300, bbox_inches='tight')
+            print(f"mpstat interrupts plot saved to '{output_file}'")
+    
     if show:
         plt.show()
     plt.close(fig)

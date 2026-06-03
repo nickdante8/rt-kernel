@@ -63,24 +63,32 @@ def timing_analysis(obj: ExperimentConfig, df, time_col, channel_col):
     rising_us = rising_us[:min_len]
     falling_us = falling_us[:min_len]
 
+    # --- Period Validation ---
+    # The user might provide the 'toggle interval' (time between state changes)
+    # instead of the 'signal period' (time between identical edges).
+    actual_avg_period = np.mean(np.diff(rising_us))
+    effective_period = obj.nominal_period_us
+    
+    if abs(actual_avg_period - 2 * obj.nominal_period_us) < abs(actual_avg_period - obj.nominal_period_us):
+        print(f"Warning: Measured period ({actual_avg_period:.1f}us) suggests nominal_period_us ({obj.nominal_period_us}us) is a toggle interval. Adjusting to full period: {2 * obj.nominal_period_us}us")
+        effective_period = 2 * obj.nominal_period_us
+
     # Rising Edge Metrics (N-1 samples)
-    # Time axis for jitter is the time of the edge that "arrived" (rising_us[1:])
     periods_rise = np.diff(rising_us)
     time_jitter_rise = rising_us[1:] 
-    jitter_rise = (periods_rise - obj.nominal_period_us)
+    jitter_rise = (periods_rise - effective_period)
     drift_rise = np.cumsum(jitter_rise)
 
     # Falling Edge Metrics (N-1 samples)
     periods_fall = np.diff(falling_us)
     time_jitter_fall = falling_us[1:]
-    jitter_fall = (periods_fall - obj.nominal_period_us)
+    jitter_fall = (periods_fall - effective_period)
     drift_fall = np.cumsum(jitter_fall)
 
     # Pulse Metrics (N samples)
-    # Time axis is the start of each pulse
     time_pulse = rising_us 
     pulse_widths = falling_us - rising_us
-    duty_cycles = (pulse_widths.astype(float) / obj.nominal_period_us) * 100
+    duty_cycles = (pulse_widths.astype(float) / effective_period) * 100
 
     return SaleaeSignalMetrics(
         reference_time=t0,

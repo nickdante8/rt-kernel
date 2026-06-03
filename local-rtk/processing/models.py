@@ -113,8 +113,17 @@ class Iperf3Metrics:
 class FioMetrics:
     clat_ns: List[int] = field(default_factory=list)
     slat_ns: List[int] = field(default_factory=list)
+    lat_ns: List[int] = field(default_factory=list)
     bandwidth_kbps: List[float] = field(default_factory=list)
+    bandwidth_read_kbps: List[float] = field(default_factory=list)
+    bandwidth_write_kbps: List[float] = field(default_factory=list)
+    bw_timestamps_read: List[float] = field(default_factory=list)
+    bw_timestamps_write: List[float] = field(default_factory=list)
     iops: List[float] = field(default_factory=list)
+    iops_read: List[float] = field(default_factory=list)
+    iops_write: List[float] = field(default_factory=list)
+    iops_timestamps_read: List[float] = field(default_factory=list)
+    iops_timestamps_write: List[float] = field(default_factory=list)
     summary: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass

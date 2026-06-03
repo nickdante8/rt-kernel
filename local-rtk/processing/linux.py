@@ -54,11 +54,25 @@ def _parse_cyclictest_thread(thread_id, thread_data):
         overflow=thread_data.get('overflow', 0),
     )
 
-def cyclictest(data):
+def cyclictest(data, log_file=None):
     """Parse cyclictest JSON output into CyclictestMetrics with per-thread data."""
     threads = {}
     for thread_id, thread_data in data['thread'].items():
         threads[thread_id] = _parse_cyclictest_thread(thread_id, thread_data)
+        
+    if log_file:
+        try:
+            with open(log_file, 'r') as f:
+                lines = f.readlines()
+            for line in lines:
+                if line.startswith('# Histogram Overflows:'):
+                    parts = line.strip().split()[3:]
+                    for i, overflow_str in enumerate(parts):
+                        thread_id = str(i)
+                        if thread_id in threads:
+                            threads[thread_id].overflow = int(overflow_str)
+        except Exception:
+            pass
 
     return CyclictestMetrics(
         t0=data['start_time'],
@@ -92,15 +106,8 @@ def proc_interrupts(start_snap, end_snap, num_cpus):
 
     return delta_records
 
-def mpstat(data):
-    if not data or 'sysstat' not in data:
-        return None
-        
-    hosts = data['sysstat'].get('hosts', [])
-    if not hosts:
-        return None
-        
-    statistics = hosts[0].get('statistics', [])
+def mpstat(statistics: list):
+    """Parses mpstat json output into MpstatMetrics."""
     if not statistics:
         return None
 
@@ -186,6 +193,17 @@ def mpstat(data):
         output.avg_system = sum(all_core.sys) / len(all_core.sys)
         output.avg_softirq = sum(all_core.soft) / len(all_core.soft)
         output.avg_idle = sum(all_core.idle) / len(all_core.idle)
+        
+        # Aggregate individual interrupts to 'all' core
+        num_timestamps = len(all_core.timestamps)
+        all_indiv = all_core.individual_interrupts
+        for core_id, core_metrics in cores_dict.items():
+            if core_id == 'all': continue
+            for irq_name, values in core_metrics.individual_interrupts.items():
+                if irq_name not in all_indiv:
+                    all_indiv[irq_name] = [0.0] * num_timestamps
+                for i in range(min(num_timestamps, len(values))):
+                    all_indiv[irq_name][i] += values[i]
     
     return output
 
@@ -380,6 +398,7 @@ def fio(load_dir: str):
     for i in range(1, 5):
         clat_file = os.path.join(load_dir, f'fio_latency_clat.{i}.log')
         slat_file = os.path.join(load_dir, f'fio_latency_slat.{i}.log')
+        lat_file = os.path.join(load_dir, f'fio_latency_lat.{i}.log')
         bw_file = os.path.join(load_dir, f'fio_bw_bw.{i}.log')
         iops_file = os.path.join(load_dir, f'oufio_iops_iops.{i}.log')
         
@@ -402,11 +421,30 @@ def fio(load_dir: str):
             pass
             
         try:
-            with open(bw_file, 'r') as f:
+            with open(lat_file, 'r') as f:
                 for line in f:
                     parts = line.strip().split(',')
                     if len(parts) >= 2:
-                        metrics.bandwidth_kbps.append(float(parts[1].strip()))
+                        metrics.lat_ns.append(int(parts[1].strip()))
+        except:
+            pass
+            
+        try:
+            with open(bw_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 3:
+                        time_ms = float(parts[0].strip()) / 1000.0  # seconds
+                        bw = float(parts[1].strip())
+                        direction = int(parts[2].strip())
+                        
+                        metrics.bandwidth_kbps.append(bw)
+                        if direction == 0:
+                            metrics.bw_timestamps_read.append(time_ms)
+                            metrics.bandwidth_read_kbps.append(bw)
+                        elif direction == 1:
+                            metrics.bw_timestamps_write.append(time_ms)
+                            metrics.bandwidth_write_kbps.append(bw)
         except:
             pass
 
@@ -414,8 +452,18 @@ def fio(load_dir: str):
             with open(iops_file, 'r') as f:
                 for line in f:
                     parts = line.strip().split(',')
-                    if len(parts) >= 2:
-                        metrics.iops.append(float(parts[1].strip()))
+                    if len(parts) >= 3:
+                        time_ms = float(parts[0].strip()) / 1000.0  # seconds
+                        iops = float(parts[1].strip())
+                        direction = int(parts[2].strip())
+                        
+                        metrics.iops.append(iops)
+                        if direction == 0:
+                            metrics.iops_timestamps_read.append(time_ms)
+                            metrics.iops_read.append(iops)
+                        elif direction == 1:
+                            metrics.iops_timestamps_write.append(time_ms)
+                            metrics.iops_write.append(iops)
         except:
             pass
             

@@ -5,7 +5,7 @@ import re
 import numpy as np
 from typing import Any
 
-from models import ExperimentConfig, ExperimentDataset
+from models import ExperimentConfig, ExperimentDataset, SyncMetadata
 import plots as proc_plt
 import saleae as proc_sl
 import linux as proc_linux
@@ -71,16 +71,42 @@ class ExperimentProcessor:
                 self.config.nominal_period_us
             )
 
-    def _extract_analysis_cyclictest(self):
-        cyclictest_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.json")
-        try:
-            with open(cyclictest_path, 'r') as file:
-                data = json.load(file)
-        except FileNotFoundError:
-            print(f"Error: The file '{cyclictest_path}' was not found.")
-            return None
+    def _extract_analysis_sync(self):        
+        # 1. Parse pid_chrt.log
+        pid_chrt_path = os.path.join(self.config.input_dir, self.config.load_type, "pid_chrt.log")
+        pid_policies = proc_linux.parse_pid_chrt(pid_chrt_path)
         
-        return proc_linux.cyclictest(data)
+        # 2. Extract software start time (CLOCK_MONOTONIC)
+        led_edges_path = os.path.join(self.config.input_dir, self.config.load_type, 'led_toggle_edges.csv')
+        t_software = proc_linux.parse_led_toggle_edges(led_edges_path)
+        
+        # 3. Extract hardware start time (Saleae)
+        t_hardware = 0.0
+        # Channel 0 is the software pin. The first toggle is HIGH (state 1), so rising edge.
+        if 0 in self.dataset.saleae and len(self.dataset.saleae[0].edges_rise) > 0:
+            t_hardware = self.dataset.saleae[0].edges_rise[0]
+            
+        offset = t_software - t_hardware if t_software > 0.0 else 0.0
+        
+        self.dataset.sync_metadata = SyncMetadata(
+            clock_monotonic_offset_s=offset,
+            pid_policies=pid_policies
+        )
+        
+        # Print validation warning if any monitoring tool is NOT in SCHED_OTHER
+        for pid, policy in pid_policies.items():
+            if policy != 'SCHED_OTHER':
+                print(f"WARNING: Process {pid} has policy {policy}. It should be SCHED_OTHER to avoid interfering with PREEMPT_RT tasks.")
+
+    def _extract_analysis_cyclictest(self):
+        cyclictest_json_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.json")
+        cyclictest_log_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.log")
+        try:
+            with open(cyclictest_json_path, 'r') as file:
+                data = json.load(file)
+            return proc_linux.cyclictest(data, log_file=cyclictest_log_path)
+        except Exception as e:
+            return None
 
     def _extract_analysis_interrupts(self):
         def parse_snapshot(file_path):
@@ -148,42 +174,14 @@ class ExperimentProcessor:
                     # Assuming they have the same length and align by timestamp
                     for i in range(min(len(stats_all), len(stats_itr))):
                         stats_all[i].update(stats_itr[i])
+                    return proc_linux.mpstat(stats_all)
         except Exception as e:
             pass # It might not exist, that's fine
             
-        if data:
-            return proc_linux.mpstat(data)
+        if data and 'sysstat' in data:
+            return proc_linux.mpstat(data['sysstat']['hosts'][0]['statistics'])
         return None
     
-    def _extract_analysis_sync(self):
-        from models import SyncMetadata
-        
-        # 1. Parse pid_chrt.log
-        pid_chrt_path = os.path.join(self.config.input_dir, self.config.load_type, "pid_chrt.log")
-        pid_policies = proc_linux.parse_pid_chrt(pid_chrt_path)
-        
-        # 2. Extract software start time (CLOCK_MONOTONIC)
-        led_edges_path = os.path.join(self.config.input_dir, self.config.load_type, 'led_toggle_edges.csv')
-        t_software = proc_linux.parse_led_toggle_edges(led_edges_path)
-        
-        # 3. Extract hardware start time (Saleae)
-        t_hardware = 0.0
-        # Channel 0 is the software pin. The first toggle is HIGH (state 1), so rising edge.
-        if 0 in self.dataset.saleae and len(self.dataset.saleae[0].edges_rise) > 0:
-            t_hardware = self.dataset.saleae[0].edges_rise[0]
-            
-        offset = t_software - t_hardware if t_software > 0.0 else 0.0
-        
-        self.dataset.sync_metadata = SyncMetadata(
-            clock_monotonic_offset_s=offset,
-            pid_policies=pid_policies
-        )
-        
-        # Print validation warning if any monitoring tool is NOT in SCHED_OTHER
-        for pid, policy in pid_policies.items():
-            if policy != 'SCHED_OTHER':
-                print(f"WARNING: Process {pid} has policy {policy}. It should be SCHED_OTHER to avoid interfering with PREEMPT_RT tasks.")
-
     def generate_all_plots(self, show=False):
         self.plot_histograms(show)
         self.plot_phase_shift_combined(show)
@@ -194,10 +192,12 @@ class ExperimentProcessor:
         self.plot_vmstat_cpu(show)
         self.plot_vmstat_system_activity(show)
         self.plot_vmstat_io(show)
+        self.plot_mpstat_interrupts(show)
         self.plot_pidstat_cpu(show)
         self.plot_network_throughput(show)
         self.plot_fio_hist(show)
-        
+        self.plot_fio_bandwidth(show)
+        self.plot_fio_iops(show)
     def plot_histograms(self, show=False):
         for ch in self.config.channels:
             if ch in self.dataset.saleae:
@@ -290,6 +290,12 @@ class ExperimentProcessor:
         out = proc_plt.plot_path(self.config, 'vmstat_io', '')
         proc_plt.plot_vmstat_io({'timestamps': self.dataset.vmstat.timestamps, 'blocks_in': self.dataset.vmstat.blocks_in, 'blocks_out': self.dataset.vmstat.blocks_out}, out, title=f'Disk I/O Activity Over Time ({self.config.load_type})', show=show)
 
+    def plot_mpstat_interrupts(self, show=False):
+        if not self.dataset.mpstat:
+            return
+        out = proc_plt.plot_path(self.config, 'mpstat_interrupts', '')
+        proc_plt.plot_mpstat_interrupts(self.dataset.mpstat, out, title=f'Selected System Interrupts ({self.config.load_type})', show=show)
+
     def plot_pidstat_cpu(self, show=False):
         if not self.dataset.pidstat:
             return
@@ -310,6 +316,22 @@ class ExperimentProcessor:
             return
         out = proc_plt.plot_path(self.config, 'fio_latency', '')
         proc_plt.plot_fio_hist(self.dataset.fio, out, title=f'FIO Latency Distribution ({self.config.load_type})', show=show)
+        
+    def plot_fio_bandwidth(self, show=False):
+        if not self.dataset.fio:
+            return
+        if len(self.dataset.fio.bandwidth_read_kbps) == 0 and len(self.dataset.fio.bandwidth_write_kbps) == 0:
+            return
+        out = proc_plt.plot_path(self.config, 'fio_bandwidth', '')
+        proc_plt.plot_fio_bandwidth(self.dataset.fio, out, title=f'FIO USB Bandwidth ({self.config.load_type})', show=show)
+
+    def plot_fio_iops(self, show=False):
+        if not self.dataset.fio:
+            return
+        if len(self.dataset.fio.iops_read) == 0 and len(self.dataset.fio.iops_write) == 0:
+            return
+        out = proc_plt.plot_path(self.config, 'fio_iops', '')
+        proc_plt.plot_fio_iops(self.dataset.fio, out, title=f'FIO USB IOPS ({self.config.load_type})', show=show)
         
 class ExperimentPlotter:
     @staticmethod
