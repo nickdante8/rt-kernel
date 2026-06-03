@@ -33,11 +33,9 @@ def main():
         dataset.load_and_process_datas()
         dataset.generate_all_plots()
 
-    # Check type of analysis to run for cross-dataset plotting
-    if len(datasets) > 1:
-        # Multiple plotting with different load types is possible
-        for ch in args.channels:
-            ExperimentPlotter.plot_duty_cycle_combined(datasets[0], datasets[1], ch)
-
+    # Duty cycle combination
+    ExperimentPlotter.plot_duty_cycle_combined(datasets, 0, show=True)
+    ExperimentPlotter.plot_duty_cycle_combined(datasets, 1, show=True, y_lim=(49.99, 50.02))
+    
 if __name__ == '__main__':
     main()

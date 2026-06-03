@@ -336,49 +336,56 @@ def plot_signal_drift_combined(data1, data2, output_file, title=None, lable=None
         plt.close(fig) # Close the figure to free up memory
 
 
-def plot_duty_cycle_combined(data1, data2, output_file, title=None, label=None, show=False, y_lim=None):
+def plot_duty_cycle_combined(datasets_data, output_file, title=None, labels=None, show=False, y_lim=None):
     """
-    Generates and saves a histogram of the jitter data.
+    Generates and saves a combined duty cycle plot using separate subplots.
     """
     plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(12, 7))
+    num_plots = len(datasets_data)
+    # Create subplots, dynamically sizing height based on number of plots
+    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 2 * num_plots), sharex=True)
+    
+    # If there's only 1 dataset, axes is not a list/array, so wrap it
+    if num_plots == 1:
+        axes = [axes]
 
-    # Create the plot
-    # The number of bins can be adjusted. 'auto' is a good starting point.
-    if label == None:
-        label = [
-            f"Duty cycle idle",
-            f"Duty cycle load"
-        ]
-    ax.plot(data1.time_pulse, data1.duty_cycles, marker='.', linestyle='dashed', color='r', alpha=0.75, label=f"{label[0]}")
-    ax.plot(data2.time_pulse, data2.duty_cycles, marker='.', linestyle='dotted', color='b', alpha=0.45, label=f"{label[1]}")
+    colors = ['r', 'b', 'g', 'purple', 'black', 'cyan']
+    
+    if labels is None:
+        labels = [f"Dataset {i}" for i in range(num_plots)]
 
-    # Add a vertical line for the mean
-    ax.axhline(50, color='black', linestyle='dashed', linewidth=1, alpha=0.3, label=f"Target (50%)")
+    for i, data in enumerate(datasets_data):
+        ax = axes[i]
+        color = colors[i % len(colors)]
+        
+        # Use scatter plotting to avoid messy overlapping lines for duty cycle
+        ax.plot(data.time_pulse, data.duty_cycles, marker='.', linestyle='dashed', color=color, alpha=0.45, label=f"{labels[i]}")
 
-    # --- Formatting the Plot ---
-    if title == None:
-        title = f'Duty cycle comparison.'
-    ax.set_title(title, fontsize=16)
-    ax.set_xlabel('Time [s]', fontsize=12)
-    ax.set_ylabel('Duryt Cycle (%)', fontsize=12)
-    ax.grid(True)
-    ax.legend(loc='best')
+        # Add a horizontal line for the mean
+        ax.axhline(50, color='black', linestyle='dashed', linewidth=1.5, alpha=0.5, label=f"Target (50%)")
 
-    # --- SET Y AXIS RANGE ---
-    # ax.set_ylim(50)
-    # Change this in your plotting function to see the tiny fluctuations
-    ax.set_ylim(y_lim)
+        ax.set_ylabel('Duty Cycle (%)', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='best')
 
-    # Save the figure to a file
+        if y_lim:
+            ax.set_ylim(y_lim)
+
+    # --- Formatting the overall Figure ---
+    if title is None:
+        title = f'Duty cycle comparison'
+    fig.suptitle(title, fontsize=16)
+    
+    # Set X label only on the bottom subplot
+    axes[-1].set_xlabel('Time [s]', fontsize=12)
+
+    plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
-    print(f"Histogram saved to '{output_file}'")
+    print(f"Duty cycle plot saved to '{output_file}'")
 
-    if show == True:
+    if show:
         plt.show()
-        plt.close(fig) # Close the figure to free up memory
-    else:
-        plt.close(fig) # Close the figure to free up
+    plt.close(fig)
 
 def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=False):
     """
@@ -710,42 +717,44 @@ def plot_fio_hist(data, output_file, title=None, show=False):
 
 def plot_fio_bandwidth(data, output_file, title=None, show=False):
     plt.style.use('ggplot')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+    fig, ax = plt.subplots(figsize=(12, 7))
 
     has_data = False
     if len(data.bw_timestamps_read) > 0 and len(data.bandwidth_read_kbps) > 0:
         sort_idx = np.argsort(data.bw_timestamps_read)
-        ax1.plot(np.array(data.bw_timestamps_read)[sort_idx], 
-                 (np.array(data.bandwidth_read_kbps) / 1024.0)[sort_idx], 
-                 marker='.', linestyle='-', color='blue', label='Read Bandwidth', alpha=0.7)
-        ax1.set_ylabel('Read BW (MB/s)', fontsize=12)
-        ax1.grid(True)
-        ax1.legend(loc='upper right')
-        
-        read_mbps = np.array(data.bandwidth_read_kbps) / 1024.0
-        stats_text = f"Avg Read: {np.mean(read_mbps):.2f} MB/s\nMax Read: {np.max(read_mbps):.2f} MB/s"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        ax.plot(np.array(data.bw_timestamps_read)[sort_idx], 
+                (np.array(data.bandwidth_read_kbps) / 1024.0)[sort_idx], 
+                marker='.', linestyle='none', color='blue', label='Read Bandwidth', alpha=0.7)
         has_data = True
         
     if len(data.bw_timestamps_write) > 0 and len(data.bandwidth_write_kbps) > 0:
         sort_idx = np.argsort(data.bw_timestamps_write)
-        ax2.plot(np.array(data.bw_timestamps_write)[sort_idx], 
-                 (np.array(data.bandwidth_write_kbps) / 1024.0)[sort_idx], 
-                 marker='.', linestyle='-', color='red', label='Write Bandwidth', alpha=0.7)
-        ax2.set_ylabel('Write BW (MB/s)', fontsize=12)
-        ax2.grid(True)
-        ax2.legend(loc='upper right')
-        
-        write_mbps = np.array(data.bandwidth_write_kbps) / 1024.0
-        stats_text = f"Avg Write: {np.mean(write_mbps):.2f} MB/s\nMax Write: {np.max(write_mbps):.2f} MB/s"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax2.text(0.02, 0.95, stats_text, transform=ax2.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        ax.plot(np.array(data.bw_timestamps_write)[sort_idx], 
+                (np.array(data.bandwidth_write_kbps) / 1024.0)[sort_idx], 
+                marker='.', linestyle='none', color='red', label='Write Bandwidth', alpha=0.7)
         has_data = True
 
     if has_data:
-        fig.suptitle(title if title else "FIO USB Bandwidth", fontsize=16)
-        ax2.set_xlabel('Time (s)', fontsize=12)
+        ax.set_title(title if title else "FIO USB Bandwidth (Read/Write)", fontsize=16)
+        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_ylabel('Bandwidth (MB/s)', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='best')
+        
+        stats_lines = []
+        if len(data.bandwidth_read_kbps) > 0:
+            read_mbps = np.array(data.bandwidth_read_kbps) / 1024.0
+            stats_lines.append(f"Avg Read: {np.mean(read_mbps):.2f} MB/s")
+            stats_lines.append(f"Max Read: {np.max(read_mbps):.2f} MB/s")
+        if len(data.bandwidth_write_kbps) > 0:
+            write_mbps = np.array(data.bandwidth_write_kbps) / 1024.0
+            stats_lines.append(f"Avg Write: {np.mean(write_mbps):.2f} MB/s")
+            stats_lines.append(f"Max Write: {np.max(write_mbps):.2f} MB/s")
+            
+        if stats_lines:
+            stats_text = "\n".join(stats_lines)
+            props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+            ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')

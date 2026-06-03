@@ -198,6 +198,7 @@ class ExperimentProcessor:
         self.plot_fio_hist(show)
         self.plot_fio_bandwidth(show)
         self.plot_fio_iops(show)
+        
     def plot_histograms(self, show=False):
         for ch in self.config.channels:
             if ch in self.dataset.saleae:
@@ -335,14 +336,12 @@ class ExperimentProcessor:
         
 class ExperimentPlotter:
     @staticmethod
-    def plot_duty_cycle_combined(obj1: ExperimentProcessor, obj2: ExperimentProcessor, channel: int, show=False, y_lim=None):
-        if channel in obj1.dataset.saleae and channel in obj2.dataset.saleae:
+    def plot_duty_cycle_combined(datasets: list, channel: int, show=False, y_lim=None):
+        valid_datasets = [ds for ds in datasets if channel in ds.dataset.saleae]
+        if len(valid_datasets) > 1:
             title = f"Duty Cycle comparison of channel {channel}"
-            label = [
-                f"{obj1.config.load_type}",
-                f"{obj2.config.load_type}"
-            ]
-            proc_plt.plot_duty_cycle_combined(obj1.dataset.saleae[channel],
-                                              obj2.dataset.saleae[channel], 
-                                              proc_plt.plot_path(obj1.config, "duty_cycle", f"{obj2.config.load_type}_{channel}",combined=True),
-                                              title, label, show=show, y_lim=y_lim)
+            labels = [ds.config.load_type for ds in valid_datasets]
+            datasets_data = [ds.dataset.saleae[channel] for ds in valid_datasets]
+            
+            output_file = proc_plt.plot_path(valid_datasets[0].config, "duty_cycle", f"combined_{channel}", combined=True)
+            proc_plt.plot_duty_cycle_combined(datasets_data, output_file, title, labels=labels, show=show, y_lim=y_lim)
