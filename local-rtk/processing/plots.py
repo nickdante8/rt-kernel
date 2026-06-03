@@ -1,11 +1,12 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 
 def plot_path(obj, type, name, combined=False):
     # Check how to combine it
     if combined == False:
         if name == None or name == "":
-            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + ".png"
+            combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + ".png"
         else:
             combined_path = "jitter_" + type + "_" + obj.test_type + "_" + obj.load_type + "_" + name + ".png"
     else:
@@ -456,3 +457,203 @@ def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=
         plt.close(fig) # Close the figure to free up memory
     else:
         plt.close(fig) # Close the figure to free up memory
+
+def plot_vmstat_cpu(data, output_file, title=None, label=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    ax.stackplot(data['timestamps'], data['usr'], data['sys'], data['wa'], data['idle'],
+                 labels=['User', 'System', 'IO Wait', 'Idle'],
+                 colors=['#2ca02c', '#1f77b4', '#d62728', '#e377c2'], alpha=0.8)
+
+    ax.set_title(title if title else "CPU Breakdown Over Time", fontsize=16)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('CPU Usage %', fontsize=12)
+    ax.set_ylim(0, 100)
+    
+    if len(data['timestamps']) > 0:
+        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+        ax.set_xticks(xticks_idx)
+        ax.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+    
+    ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"vmstat CPU plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_vmstat_system_activity(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx()
+
+    ax1.plot(data['timestamps'], data['context_switches'], color='blue', alpha=0.8, label='Context Switches')
+    ax2.plot(data['timestamps'], data['interrupts'], color='red', alpha=0.8, label='System Interrupts')
+
+    ax1.set_title(title if title else "System Activity (vmstat)", fontsize=16)
+    ax1.set_xlabel('Time', fontsize=12)
+    ax1.set_ylabel('Context Switches / sec', color='blue', fontsize=12)
+    ax2.set_ylabel('Interrupts / sec', color='red', fontsize=12)
+    
+    if len(data['timestamps']) > 0:
+        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+        ax1.set_xticks(xticks_idx)
+        ax1.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"vmstat system activity plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_vmstat_io(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    ax.plot(data['timestamps'], data['blocks_in'], color='purple', alpha=0.8, label='Blocks In (Read)')
+    ax.plot(data['timestamps'], data['blocks_out'], color='orange', alpha=0.8, label='Blocks Out (Write)')
+
+    ax.set_title(title if title else "Disk I/O Activity (vmstat)", fontsize=16)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Blocks / sec', fontsize=12)
+    
+    if len(data['timestamps']) > 0:
+        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+        ax.set_xticks(xticks_idx)
+        ax.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"vmstat IO plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_pid_cpu(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    for cmd, cpu_array in data.pid_cpu.items():
+        min_len = min(len(data.timestamps), len(cpu_array))
+        ax.plot(data.timestamps[:min_len], cpu_array[:min_len], marker='.', label=f'{cmd} CPU%')
+
+    ax.set_title(title if title else "Process CPU Usage", fontsize=16)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('CPU Usage %', fontsize=12)
+    
+    if len(data.timestamps) > 0:
+        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
+        ax.set_xticks(xticks_idx)
+        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
+
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"pidstat CPU plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_pid_cswch(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    colors = plt.cm.tab10(np.linspace(0, 1, len(data.pid_cswch)))
+    for idx, (cmd, cswch_array) in enumerate(data.pid_cswch.items()):
+        min_len = min(len(data.timestamps), len(cswch_array))
+        ax.plot(data.timestamps[:min_len], cswch_array[:min_len], marker='.', color=colors[idx], label=f'{cmd} (Voluntary)')
+        
+        nvcswch_array = data.pid_nvcswch.get(cmd, [])
+        if len(nvcswch_array) > 0:
+            min_len_nv = min(len(data.timestamps), len(nvcswch_array))
+            ax.plot(data.timestamps[:min_len_nv], nvcswch_array[:min_len_nv], marker='x', linestyle='--', color=colors[idx], label=f'{cmd} (Non-Voluntary)')
+
+    ax.set_title(title if title else "Process Context Switches", fontsize=16)
+    ax.set_xlabel('Time', fontsize=12)
+    ax.set_ylabel('Context Switches / sec', fontsize=12)
+    
+    if len(data.timestamps) > 0:
+        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
+        ax.set_xticks(xticks_idx)
+        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
+
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"pidstat CS plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_network_throughput(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax1 = plt.subplots(figsize=(12, 7))
+    ax2 = ax1.twinx()
+
+    bps = np.array(data.bits_per_second) / 1_000_000  # Mbps
+    ax1.plot(data.timestamps, bps, color='blue', alpha=0.8, marker='o', label='Throughput (Mbps)')
+    ax2.plot(data.timestamps, data.retransmits, color='red', alpha=0.8, marker='x', linestyle='--', label='Retransmits')
+
+    ax1.set_title(title if title else "Network Throughput (iperf3)", fontsize=16)
+    ax1.set_xlabel('Time (s)', fontsize=12)
+    ax1.set_ylabel('Throughput (Mbps)', color='blue', fontsize=12)
+    ax2.set_ylabel('Retransmits', color='red', fontsize=12)
+    
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"iperf3 plot saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_fio_hist(data, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    # Latencies in fio logs are in nanoseconds. Convert to microseconds.
+    clat_us = np.array(data.clat_ns) / 1000.0
+
+    ax.hist(clat_us, bins='auto', density=True, color='purple', alpha=0.75, label='FIO Completion Latency')
+    
+    if len(data.slat_ns) > 0:
+        slat_us = np.array(data.slat_ns) / 1000.0
+        ax.hist(slat_us, bins='auto', density=True, color='cyan', alpha=0.5, label='FIO Submission Latency')
+
+    if len(clat_us) > 0:
+        mean_us = np.mean(clat_us)
+        ax.axvline(mean_us, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_us:.2f} µs')
+
+    ax.set_title(title if title else "FIO Latency Distribution", fontsize=16)
+    ax.set_xlabel('Latency (µs)', fontsize=12)
+    ax.set_ylabel('Probability Density', fontsize=12)
+    ax.grid(True)
+    ax.legend(loc='upper right')
+
+    if len(clat_us) > 0:
+        stats_text = (
+            f"Samples: {len(clat_us)}\n"
+            f"Min Latency: {np.min(clat_us):.2f} µs\n"
+            f"Max Latency: {np.max(clat_us):.2f} µs\n"
+            f"99th Percentile: {np.percentile(clat_us, 99):.2f} µs"
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax.text(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"FIO histogram saved to '{output_file}'")
+    if show:
+        plt.show()
+    plt.close(fig)

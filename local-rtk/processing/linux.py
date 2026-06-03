@@ -1,6 +1,22 @@
-import math
+"""
+Parsers for raw Linux profiling artifacts used by the processing pipeline.
+"""
+import pandas as pd
 import numpy as np
-from models import CyclictestMetrics, CyclictestThreadMetrics, MpstatMetrics, CpuTimelineMetrics
+import os
+import json
+import math
+
+from models import (
+    CyclictestMetrics,
+    CyclictestThreadMetrics,
+    MpstatMetrics,
+    CpuTimelineMetrics,
+    Iperf3Metrics,
+    FioMetrics,
+    PidstatMetrics,
+    VmstatMetrics,
+)
 
 def _parse_cyclictest_thread(thread_id, thread_data):
     """Parse a single cyclictest thread into CyclictestThreadMetrics."""
@@ -172,3 +188,235 @@ def mpstat(data):
         output.avg_idle = sum(all_core.idle) / len(all_core.idle)
     
     return output
+
+def parse_pid_chrt(filepath: str) -> dict:
+    """Parses pid_chrt.log to extract scheduling policies."""
+    policies = {}
+    try:
+        with open(filepath, 'r') as f:
+            for line in f:
+                if 'current scheduling policy:' in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        pid = parts[1].strip("'s")
+                        policy = parts[-1]
+                        policies[pid] = policy
+    except FileNotFoundError:
+        pass
+    return policies
+
+def parse_led_toggle_edges(filepath: str) -> float:
+    """Parses led_toggle_edges.csv and returns the very first toggle timestamp (CLOCK_MONOTONIC)."""
+    try:
+        df = pd.read_csv(filepath)
+        if not df.empty:
+            return float(df['Time'].iloc[0])
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        pass
+    return 0.0
+
+def vmstat(filepath: str):
+    """Parses vmstat.log."""    
+    timestamps = []
+    cs = []
+    _in = []
+    usr = []
+    sys_cpu = []
+    idle = []
+    wa = []
+    mem_free = []
+    mem_buff = []
+    mem_cache = []
+    bi = []
+    bo = []
+    
+    try:
+        with open(filepath, 'r') as f:
+            lines = f.readlines()
+            
+        for line in lines[2:]:  # skip headers
+            parts = line.strip().split()
+            if len(parts) >= 20:
+                mem_free.append(int(parts[3]))
+                mem_buff.append(int(parts[4]))
+                mem_cache.append(int(parts[5]))
+                bi.append(int(parts[8]))
+                bo.append(int(parts[9]))
+                _in.append(int(parts[10]))
+                cs.append(int(parts[11]))
+                usr.append(int(parts[12]))
+                sys_cpu.append(int(parts[13]))
+                idle.append(int(parts[14]))
+                wa.append(int(parts[15]))
+                timestamps.append(parts[18] + ' ' + parts[19])
+    except FileNotFoundError:
+        return None
+        
+    if not timestamps:
+        return None
+        
+    return VmstatMetrics(
+        timestamps=np.array(timestamps),
+        context_switches=np.array(cs),
+        interrupts=np.array(_in),
+        usr=np.array(usr),
+        sys=np.array(sys_cpu),
+        idle=np.array(idle),
+        wa=np.array(wa),
+        memory_free=np.array(mem_free),
+        memory_buff=np.array(mem_buff),
+        memory_cache=np.array(mem_cache),
+        blocks_in=np.array(bi),
+        blocks_out=np.array(bo)
+    )
+
+def pidstat(filepath: str):
+    timestamps = []
+    pid_cpu = {}
+    pid_cswch = {}
+    pid_nvcswch = {}
+    
+    try:
+        with open(filepath, 'r') as f:
+            lines = f.readlines()
+            
+        current_time = None
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('Linux') or line.startswith('Average:'):
+                continue
+                
+            parts = line.split()
+            if len(parts) < 3:
+                continue
+                
+            if 'UID' in parts and 'PID' in parts:
+                continue
+                
+            time_str = parts[0]
+            cmd = parts[-1]
+            
+            if len(parts) == 10:
+                cpu_usage = float(parts[7])
+                if cmd not in pid_cpu:
+                    pid_cpu[cmd] = []
+                pid_cpu[cmd].append(cpu_usage)
+                if time_str not in timestamps:
+                    timestamps.append(time_str)
+            elif len(parts) == 6:
+                cswch = float(parts[3])
+                nvcswch = float(parts[4])
+                if cmd not in pid_cswch:
+                    pid_cswch[cmd] = []
+                    pid_nvcswch[cmd] = []
+                pid_cswch[cmd].append(cswch)
+                pid_nvcswch[cmd].append(nvcswch)
+                
+    except FileNotFoundError:
+        return None
+
+    if not timestamps:
+        return None
+        
+    for k in pid_cpu:
+        pid_cpu[k] = np.array(pid_cpu[k])
+    for k in pid_cswch:
+        pid_cswch[k] = np.array(pid_cswch[k])
+        pid_nvcswch[k] = np.array(pid_nvcswch[k])
+        
+    return PidstatMetrics(
+        timestamps=np.array(timestamps),
+        pid_cpu=pid_cpu,
+        pid_cswch=pid_cswch,
+        pid_nvcswch=pid_nvcswch
+    )
+
+def iperf3(filepath: str):
+    try:
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+            
+        intervals = data.get('intervals', [])
+        timestamps = []
+        bits_per_second = []
+        retransmits = []
+        rtt = []
+        
+        for interval in intervals:
+            sum_data = interval.get('sum', {})
+            timestamps.append(sum_data.get('end', 0.0))
+            bits_per_second.append(sum_data.get('bits_per_second', 0.0))
+            retransmits.append(sum_data.get('retransmits', 0))
+            
+            streams = interval.get('streams', [])
+            if streams:
+                rtt.append(streams[0].get('rtt', 0.0))
+            else:
+                rtt.append(0.0)
+                
+        return Iperf3Metrics(
+            timestamps=timestamps,
+            bits_per_second=bits_per_second,
+            retransmits=retransmits,
+            rtt=rtt,
+            cpu_util_host=data.get('end', {}).get('cpu_utilization_percent', {}).get('host_total', None),
+            cpu_util_remote=data.get('end', {}).get('cpu_utilization_percent', {}).get('remote_total', None),
+            start_time=data.get('start', {}).get('timestamp', {}).get('time', None),
+            end_time=data.get('end', {}).get('timestamp', {}).get('time', None)
+        )
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def fio(load_dir: str):
+    metrics = FioMetrics()
+    
+    summary_file = os.path.join(load_dir, 'fio_summary.json')
+    try:
+        with open(summary_file, 'r') as f:
+            metrics.summary = json.load(f)
+    except:
+        pass
+            
+    for i in range(1, 5):
+        clat_file = os.path.join(load_dir, f'fio_latency_clat.{i}.log')
+        slat_file = os.path.join(load_dir, f'fio_latency_slat.{i}.log')
+        bw_file = os.path.join(load_dir, f'fio_bw_bw.{i}.log')
+        iops_file = os.path.join(load_dir, f'oufio_iops_iops.{i}.log')
+        
+        try:
+            with open(clat_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2:
+                        metrics.clat_ns.append(int(parts[1].strip()))
+        except:
+            pass
+            
+        try:
+            with open(slat_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2:
+                        metrics.slat_ns.append(int(parts[1].strip()))
+        except:
+            pass
+            
+        try:
+            with open(bw_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2:
+                        metrics.bandwidth_kbps.append(float(parts[1].strip()))
+        except:
+            pass
+
+        try:
+            with open(iops_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) >= 2:
+                        metrics.iops.append(float(parts[1].strip()))
+        except:
+            pass
+            
+    return metrics

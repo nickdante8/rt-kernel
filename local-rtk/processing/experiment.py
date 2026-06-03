@@ -35,9 +35,14 @@ class ExperimentProcessor:
 
     def load_and_process_datas(self):
         self._extract_analysis_saleae()
+        self._extract_analysis_sync()
         self.dataset.cyclictest = self._extract_analysis_cyclictest()
         self.dataset.proc_interrupts = self._extract_analysis_interrupts()
         self.dataset.mpstat = self._extract_analysis_mpstat()
+        self.dataset.pidstat = proc_linux.pidstat(os.path.join(self.config.input_dir, self.config.load_type, 'pidstat.log'))
+        self.dataset.vmstat = proc_linux.vmstat(os.path.join(self.config.input_dir, self.config.load_type, 'vmstat.log'))
+        self.dataset.iperf3 = proc_linux.iperf3(os.path.join(self.config.input_dir, self.config.load_type, 'network_results.json'))
+        self.dataset.fio = proc_linux.fio(os.path.join(self.config.input_dir, self.config.load_type))
 
     def _extract_analysis_saleae(self):
         csv_path = os.path.join(self.config.input_dir, self.config.load_type, "digital.csv")
@@ -122,15 +127,62 @@ class ExperimentProcessor:
             return None
 
     def _extract_analysis_mpstat(self):
-        mpstat_sum_itr_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_all.log")
+        mpstat_all_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_all.log")
+        mpstat_sum_itr_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_sum_itr.log")
+        
+        data = None
+        try:
+            with open(mpstat_all_path, 'r') as file:
+                data = json.load(file)
+        except Exception as e:
+            print(f"Error loading {mpstat_all_path}: {e}")
+            
         try:
             with open(mpstat_sum_itr_path, 'r') as file:
-                data = json.load(file)
-        except FileNotFoundError:
-            print(f"Error: The file '{mpstat_sum_itr_path}' was not found.")
-            return None
+                itr_data = json.load(file)
+                if data and 'sysstat' in data and 'sysstat' in itr_data:
+                    # Merge statistics
+                    stats_all = data['sysstat']['hosts'][0]['statistics']
+                    stats_itr = itr_data['sysstat']['hosts'][0]['statistics']
+                    
+                    # Assuming they have the same length and align by timestamp
+                    for i in range(min(len(stats_all), len(stats_itr))):
+                        stats_all[i].update(stats_itr[i])
+        except Exception as e:
+            pass # It might not exist, that's fine
+            
+        if data:
+            return proc_linux.mpstat(data)
+        return None
+    
+    def _extract_analysis_sync(self):
+        from models import SyncMetadata
         
-        return proc_linux.mpstat(data)
+        # 1. Parse pid_chrt.log
+        pid_chrt_path = os.path.join(self.config.input_dir, self.config.load_type, "pid_chrt.log")
+        pid_policies = proc_linux.parse_pid_chrt(pid_chrt_path)
+        
+        # 2. Extract software start time (CLOCK_MONOTONIC)
+        led_edges_path = os.path.join(self.config.input_dir, self.config.load_type, 'led_toggle_edges.csv')
+        t_software = proc_linux.parse_led_toggle_edges(led_edges_path)
+        
+        # 3. Extract hardware start time (Saleae)
+        t_hardware = 0.0
+        # Channel 0 is the software pin. The first toggle is HIGH (state 1), so rising edge.
+        if 0 in self.dataset.saleae and len(self.dataset.saleae[0].edges_rise) > 0:
+            t_hardware = self.dataset.saleae[0].edges_rise[0]
+            
+        offset = t_software - t_hardware if t_software > 0.0 else 0.0
+        
+        self.dataset.sync_metadata = SyncMetadata(
+            clock_monotonic_offset_s=offset,
+            pid_policies=pid_policies
+        )
+        
+        # Print validation warning if any monitoring tool is NOT in SCHED_OTHER
+        for pid, policy in pid_policies.items():
+            if policy != 'SCHED_OTHER':
+                print(f"WARNING: Process {pid} has policy {policy}. It should be SCHED_OTHER to avoid interfering with PREEMPT_RT tasks.")
 
     def generate_all_plots(self, show=False):
         self.plot_histograms(show)
@@ -139,6 +191,13 @@ class ExperimentProcessor:
         self.plot_signal_drift_combined(show)
         self.plot_interrupts_stacked_bar(show)
 
+        self.plot_vmstat_cpu(show)
+        self.plot_vmstat_system_activity(show)
+        self.plot_vmstat_io(show)
+        self.plot_pidstat_cpu(show)
+        self.plot_network_throughput(show)
+        self.plot_fio_hist(show)
+        
     def plot_histograms(self, show=False):
         for ch in self.config.channels:
             if ch in self.dataset.saleae:
@@ -213,6 +272,45 @@ class ExperimentProcessor:
                                                   proc_plt.plot_path(self.config, "bar", "proc_interrupts"),
                                                   title, None, show=show)
 
+    def plot_vmstat_cpu(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_cpu', '')
+        proc_plt.plot_vmstat_cpu({'timestamps': self.dataset.vmstat.timestamps, 'usr': self.dataset.vmstat.usr, 'sys': self.dataset.vmstat.sys, 'idle': self.dataset.vmstat.idle, 'wa': self.dataset.vmstat.wa}, out, title=f'CPU Breakdown Over Time ({self.config.load_type})', show=show)
+
+    def plot_vmstat_system_activity(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_activity', '')
+        proc_plt.plot_vmstat_system_activity({'timestamps': self.dataset.vmstat.timestamps, 'context_switches': self.dataset.vmstat.context_switches, 'interrupts': self.dataset.vmstat.interrupts}, out, title=f'System Activity Over Time ({self.config.load_type})', show=show)
+
+    def plot_vmstat_io(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_io', '')
+        proc_plt.plot_vmstat_io({'timestamps': self.dataset.vmstat.timestamps, 'blocks_in': self.dataset.vmstat.blocks_in, 'blocks_out': self.dataset.vmstat.blocks_out}, out, title=f'Disk I/O Activity Over Time ({self.config.load_type})', show=show)
+
+    def plot_pidstat_cpu(self, show=False):
+        if not self.dataset.pidstat:
+            return
+        out = proc_plt.plot_path(self.config, 'pidstat_cpu', '')
+        proc_plt.plot_pid_cpu(self.dataset.pidstat, out, title=f'Process CPU Usage Over Time ({self.config.load_type})', show=show)
+
+        out_cs = proc_plt.plot_path(self.config, 'pidstat_cswch', '')
+        proc_plt.plot_pid_cswch(self.dataset.pidstat, out_cs, title=f'Process Context Switches ({self.config.load_type})', show=show)
+
+    def plot_network_throughput(self, show=False):
+        if not self.dataset.iperf3:
+            return
+        out = proc_plt.plot_path(self.config, 'iperf3', '')
+        proc_plt.plot_network_throughput(self.dataset.iperf3, out, title=f'Network Throughput Over Time ({self.config.load_type})', show=show)
+
+    def plot_fio_hist(self, show=False):
+        if not self.dataset.fio or not self.dataset.fio.clat_ns:
+            return
+        out = proc_plt.plot_path(self.config, 'fio_latency', '')
+        proc_plt.plot_fio_hist(self.dataset.fio, out, title=f'FIO Latency Distribution ({self.config.load_type})', show=show)
+        
 class ExperimentPlotter:
     @staticmethod
     def plot_duty_cycle_combined(obj1: ExperimentProcessor, obj2: ExperimentProcessor, channel: int, show=False, y_lim=None):
