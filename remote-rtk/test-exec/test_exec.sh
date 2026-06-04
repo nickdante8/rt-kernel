@@ -178,9 +178,9 @@ test_start() {
         # fio USB load
         sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
-            --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
-            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
-            --output-format=json --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
+            --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
+            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=1000 \
+            --output-format=json+ --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
         FIO_PID=$!
 
         # USB load
@@ -189,9 +189,9 @@ test_start() {
         # fio USB load
         sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
-            --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
-            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
-            --output-format=json --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
+            --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
+            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=1000 \
+            --output-format=json+ --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
         FIO_PID=$!
         # iperf3 network load
         iperf3 -c ${SERVER_IP} -R -i 1 -t ${CAPTURE_DURATION_S_EXTENDED} &
@@ -203,9 +203,9 @@ test_start() {
         # fio USB load
         sudo fio --name=${load_type} --filename=/dev/sda --size=100M --time_based --runtime=${CAPTURE_DURATION_S_EXTENDED} \
             --ioengine=libaio --direct=1 --rw=randrw --rwmixread=50 --bs=4k --iodepth=16 --numjobs=4 --group_reporting \
-            --write_lat_log=${OUTPUT_DIR}/${load_type}/fio_latency --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
-            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=500 \
-            --output-format=json --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
+            --write_iops_log=${OUTPUT_DIR}/${load_type}/oufio_iops \
+            --write_bw_log=${OUTPUT_DIR}/${load_type}/fio_bw --log_avg_msec=1000 \
+            --output-format=json+ --output=${OUTPUT_DIR}/${load_type}/fio_summary.json &
         FIO_PID=$!
         # iperf3 network load
         iperf3 -c ${SERVER_IP} -R -i 1 -t ${CAPTURE_DURATION_S_EXTENDED} &

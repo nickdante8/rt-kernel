@@ -2,6 +2,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+from models import (
+    SaleaeSignalMetrics,
+    SaleaeCrossMetrics,
+    CyclictestMetrics,
+    MpstatMetrics,
+    Iperf3Metrics,
+    FioMetrics,
+    VmstatMetrics,
+    PidstatMetrics
+)
+
 def plot_path(obj, type, name, combined=False):
     # Check how to combine it
     if combined == False:
@@ -20,7 +31,7 @@ def plot_path(obj, type, name, combined=False):
     
     return combined_path
 
-def plot_histogram_rise(data, output_file, title=None, label=None, show=False):
+def plot_histogram_rise(data: SaleaeSignalMetrics, output_file, title=None, label=None, show=False):
     """
     Generates and saves a histogram of the jitter data.
     """
@@ -67,7 +78,7 @@ def plot_histogram_rise(data, output_file, title=None, label=None, show=False):
     else:
         plt.close(fig) # Close the figure to free up memory
         
-def plot_histogram_fall(data, output_file, title=None, label=None, show=False):
+def plot_histogram_fall(data: SaleaeSignalMetrics, output_file, title=None, label=None, show=False):
     """
     Generates and saves a histogram of the jitter data.
     """
@@ -114,7 +125,7 @@ def plot_histogram_fall(data, output_file, title=None, label=None, show=False):
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_histogram_combined(data, output_file, title=None, label=None, show=False):
+def plot_histogram_combined(data: SaleaeSignalMetrics, output_file, title=None, label=None, show=False):
     """
     Generates and saves a histogram of the jitter data.
     """
@@ -173,7 +184,7 @@ def plot_histogram_combined(data, output_file, title=None, label=None, show=Fals
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_histogram_cyclic_test(data, output_file, title=None, label=None, show=False):
+def plot_histogram_cyclictest(data: CyclictestMetrics, output_file, title=None, label=None, show=False):
     """
     Generates and saves overlaid per-CPU histograms from multi-thread cyclictest data.
     Each thread (CPU) is rendered as a separate semi-transparent bar series.
@@ -230,7 +241,7 @@ def plot_histogram_cyclic_test(data, output_file, title=None, label=None, show=F
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_phase_shift_combined(data, output_file, title=None, label=None, show=False):
+def plot_phase_shift_combined(data: SaleaeCrossMetrics, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
     fig, ax1 = plt.subplots(figsize=(10, 6))
     ax2 = ax1.twinx()
@@ -265,7 +276,7 @@ def plot_phase_shift_combined(data, output_file, title=None, label=None, show=Fa
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_signal_drift(data, output_file, title=None, label=None, show=False):
+def plot_signal_drift(data: SaleaeSignalMetrics, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
     fig, ax1 = plt.subplots(figsize=(10, 6))
     ax2 = ax1.twinx()
@@ -300,7 +311,7 @@ def plot_signal_drift(data, output_file, title=None, label=None, show=False):
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_signal_drift_combined(data1, data2, output_file, title=None, lable=None, show=False):
+def plot_signal_drift_combined(data1: SaleaeSignalMetrics, data2: SaleaeSignalMetrics, output_file, title=None, lable=None, show=False):
     plt.style.use('ggplot')
     fig, ax1 = plt.subplots(figsize=(10, 6))
     ax2 = ax1.twinx()
@@ -336,12 +347,12 @@ def plot_signal_drift_combined(data1, data2, output_file, title=None, lable=None
         plt.close(fig) # Close the figure to free up memory
 
 
-def plot_duty_cycle_combined(datasets_data, output_file, title=None, labels=None, show=False, y_lim=None):
+def plot_duty_cycle_combined(datas: SaleaeSignalMetrics, output_file, title=None, labels=None, show=False, y_lim=None):
     """
     Generates and saves a combined duty cycle plot using separate subplots.
     """
     plt.style.use('ggplot')
-    num_plots = len(datasets_data)
+    num_plots = len(datas)
     # Create subplots, dynamically sizing height based on number of plots
     fig, axes = plt.subplots(num_plots, 1, figsize=(12, 2 * num_plots), sharex=True)
     
@@ -349,12 +360,12 @@ def plot_duty_cycle_combined(datasets_data, output_file, title=None, labels=None
     if num_plots == 1:
         axes = [axes]
 
-    colors = ['r', 'b', 'g', 'purple', 'black', 'cyan']
+    colors = ['r', 'b', 'g', 'purple', 'black', 'grey']
     
     if labels is None:
         labels = [f"Dataset {i}" for i in range(num_plots)]
 
-    for i, data in enumerate(datasets_data):
+    for i, data in enumerate(datas):
         ax = axes[i]
         color = colors[i % len(colors)]
         
@@ -465,17 +476,17 @@ def plot_interrupts_stacked_bar(data, output_file, title=None, label=None, show=
     else:
         plt.close(fig) # Close the figure to free up memory
 
-def plot_vmstat_cpu(data, output_file, title=None, label=None, show=False):
+def plot_vmstat_cpu(data: VmstatMetrics, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
-    avg_usr = np.mean(data['usr']) if len(data['usr']) > 0 else 0
-    avg_sys = np.mean(data['sys']) if len(data['sys']) > 0 else 0
-    avg_wa = np.mean(data['wa']) if len(data['wa']) > 0 else 0
-    avg_idle = np.mean(data['idle']) if len(data['idle']) > 0 else 0
+    avg_usr = np.mean(data.usr) if len(data.usr) > 0 else 0
+    avg_sys = np.mean(data.sys) if len(data.sys) > 0 else 0
+    avg_wa = np.mean(data.wa) if len(data.wa) > 0 else 0
+    avg_idle = np.mean(data.idle) if len(data.idle) > 0 else 0
     labels = [f'User ({avg_usr:.1f}%)', f'System ({avg_sys:.1f}%)', f'IO Wait ({avg_wa:.1f}%)', f'Idle ({avg_idle:.1f}%)']
 
-    ax.stackplot(data['timestamps'], data['usr'], data['sys'], data['wa'], data['idle'],
+    ax.stackplot(data.timestamps, data.usr, data.sys, data.wa, data.idle,
                  labels=labels,
                  colors=['#2ca02c', '#1f77b4', '#d62728', '#e377c2'], alpha=0.8)
 
@@ -484,10 +495,10 @@ def plot_vmstat_cpu(data, output_file, title=None, label=None, show=False):
     ax.set_ylabel('CPU Usage %', fontsize=12)
     ax.set_ylim(0, 100)
     
-    if len(data['timestamps']) > 0:
-        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+    if len(data.timestamps) > 0:
+        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
         ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
     
     ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
     plt.tight_layout()
@@ -497,23 +508,23 @@ def plot_vmstat_cpu(data, output_file, title=None, label=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_vmstat_system_activity(data, output_file, title=None, show=False):
+def plot_vmstat_system_activity(data: VmstatMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
 
-    ax1.plot(data['timestamps'], data['context_switches'], color='blue', alpha=0.7, label='Total System Context Switches', linewidth=2)
-    ax2.plot(data['timestamps'], data['interrupts'], color='red', alpha=0.7, label='Total System Interrupts', linewidth=2)
+    ax1.plot(data.timestamps, data.context_switches, color='blue', alpha=0.7, label='Total System Context Switches', linewidth=2)
+    ax2.plot(data.timestamps, data.interrupts, color='red', alpha=0.7, label='Total System Interrupts', linewidth=2)
 
     ax1.set_title(title if title else "Total System Activity (vmstat)", fontsize=16)
     ax1.set_xlabel('Time', fontsize=12)
     ax1.set_ylabel('Context Switches / sec', color='blue', fontsize=12)
     ax2.set_ylabel('Interrupts / sec', color='red', fontsize=12)
     
-    if len(data['timestamps']) > 0:
-        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+    if len(data.timestamps) > 0:
+        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
         ax1.set_xticks(xticks_idx)
-        ax1.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+        ax1.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -526,21 +537,21 @@ def plot_vmstat_system_activity(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_vmstat_io(data, output_file, title=None, show=False):
+def plot_vmstat_io(data: VmstatMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
-    ax.plot(data['timestamps'], data['blocks_in'], color='purple', alpha=0.8, label='Blocks In (Read)')
-    ax.plot(data['timestamps'], data['blocks_out'], color='orange', alpha=0.8, label='Blocks Out (Write)')
+    ax.plot(data.timestamps, data.blocks_in, color='purple', alpha=0.8, label='Blocks In (Read)')
+    ax.plot(data.timestamps, data.blocks_out, color='orange', alpha=0.8, label='Blocks Out (Write)')
 
     ax.set_title(title if title else "Disk I/O Activity (vmstat)", fontsize=16)
     ax.set_xlabel('Time', fontsize=12)
     ax.set_ylabel('Blocks / sec', fontsize=12)
     
-    if len(data['timestamps']) > 0:
-        xticks_idx = np.linspace(0, len(data['timestamps']) - 1, min(10, len(data['timestamps'])), dtype=int)
+    if len(data.timestamps) > 0:
+        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
         ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data['timestamps'][i].split()[-1] for i in xticks_idx], rotation=45)
+        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
     plt.tight_layout()
@@ -550,7 +561,7 @@ def plot_vmstat_io(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_pid_cpu(data, output_file, title=None, show=False):
+def plot_pid_cpu(data: PidstatMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
@@ -577,7 +588,7 @@ def plot_pid_cpu(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_pid_cswch(data, output_file, title=None, show=False):
+def plot_pid_cswch(data: PidstatMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
@@ -612,7 +623,7 @@ def plot_pid_cswch(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_network_throughput(data, output_file, title=None, show=False):
+def plot_network_throughput(data: Iperf3Metrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
@@ -653,60 +664,59 @@ def plot_network_throughput(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_fio_hist(data, output_file, title=None, show=False):
+def plot_fio_hist(data: FioMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
-    # Latencies in fio logs are in nanoseconds. Convert to milliseconds.
-    if len(data.slat_ns) > 0:
-        slat_ms = np.array(data.slat_ns) / 1000000.0
-        ax.hist(slat_ms, bins='auto', density=True, color='#2196F3', alpha=0.5, label='FIO Submission Latency (slat)')
-        mean_sus = np.mean(slat_ms)
-        ax.axvline(mean_sus, color='#2196F3', linestyle='--', linewidth=2, label=f'Mean slat: {mean_sus:.2f} ms')
+    stats_lines = []
+
+    def process_bins(bins_data, color, label):
+        if not bins_data:
+            return
+            
+        bins_ms = bins_data['latency']
+        counts = bins_data['frequency']
         
-    if len(data.lat_ns) > 0:
-        lat_ms = np.array(data.lat_ns) / 1000000.0
-        ax.hist(lat_ms, bins='auto', density=True, color='#4CAF50', alpha=0.4, label='FIO Total Latency (lat)')
-        mean_lus = np.mean(lat_ms)
-        ax.axvline(mean_lus, color='#4CAF50', linestyle='--', linewidth=2, label=f'Mean lat: {mean_lus:.2f} ms')
+        total_samples = sum(counts)
+        if total_samples == 0:
+            return
+            
+        sum_lat = sum(l * c for l, c in zip(bins_ms, counts))
+        
+        # Plot using ax.bar as requested
+        ax.bar(bins_ms, counts, width=1.0, color=color, alpha=0.6, align='edge', edgecolor='black', linewidth=0.5, label=label)
+        
+        mean_cus = sum_lat / total_samples
+        ax.axvline(mean_cus, color=color, linestyle='--', linewidth=2, label=f'Mean {label}: {mean_cus:.2f} ms')
+        
+        cumulative = 0
+        p99 = 0
+        for k, c in zip(bins_ms, counts):
+            cumulative += c
+            if cumulative >= 0.99 * total_samples:
+                p99 = k
+                break
+                
+        stats_lines.append(f"--- {label} ---")
+        stats_lines.append(f"Samples: {total_samples}")
+        stats_lines.append(f"Mean: {mean_cus:.2f} ms")
+        stats_lines.append(f"Max: {bins_ms[-1]:.2f} ms")
+        stats_lines.append(f"99th: {p99:.2f} ms")
 
-    if len(data.clat_ns) > 0:
-        clat_ms = np.array(data.clat_ns) / 1000000.0
-        ax.hist(clat_ms, bins='auto', density=True, color='#FF5722', alpha=0.75, label='FIO Completion Latency (clat)')
-        mean_cus = np.mean(clat_ms)
-        ax.axvline(mean_cus, color='#FF5722', linestyle='--', linewidth=2, label=f'Mean clat: {mean_cus:.2f} ms')
+    process_bins(data.clat_bins_read, '#2196F3', 'Read (clat)')
+    process_bins(data.clat_bins_write, '#FF5722', 'Write (clat)')
 
+    ax.set_xscale('log')
     ax.set_title(title if title else "FIO Latency Distribution", fontsize=16)
-    ax.set_xlabel('Latency (ms)', fontsize=12)
-    ax.set_ylabel('Probability Density', fontsize=12)
+    ax.set_xlabel('Latency (ms) - Log Scale', fontsize=12)
+    ax.set_ylabel('Count', fontsize=12)
     ax.grid(True)
     ax.legend(loc='upper right')
 
-    stats_lines = []
-    if len(data.clat_ns) > 0:
-        clat_ms = np.array(data.clat_ns) / 1000000.0
-        stats_lines.append("--- Completion Latency (clat) ---")
-        stats_lines.append(f"Samples: {len(clat_ms)}")
-        stats_lines.append(f"Mean: {np.mean(clat_ms):.2f} ms")
-        stats_lines.append(f"Max: {np.max(clat_ms):.2f} ms")
-        stats_lines.append(f"99th: {np.percentile(clat_ms, 99):.2f} ms")
-        
-    if len(data.slat_ns) > 0:
-        slat_ms = np.array(data.slat_ns) / 1000000.0
-        stats_lines.append("\n--- Submission Latency (slat) ---")
-        stats_lines.append(f"Mean: {np.mean(slat_ms):.2f} ms")
-        stats_lines.append(f"Max: {np.max(slat_ms):.2f} ms")
-        stats_lines.append(f"99th: {np.percentile(slat_ms, 99):.2f} ms")
-    if len(data.lat_ns) > 0:
-        lat_ms = np.array(data.lat_ns) / 1000000.0
-        stats_lines.append("\n--- Total Latency (lat) ---")
-        stats_lines.append(f"Mean: {np.mean(lat_ms):.2f} ms")
-        stats_lines.append(f"Max: {np.max(lat_ms):.2f} ms")
-        stats_lines.append(f"99th: {np.percentile(lat_ms, 99):.2f} ms")
-
-    stats_text = "\n".join(stats_lines)
-    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-    ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=9, verticalalignment='top', bbox=props)
+    if stats_lines:
+        stats_text = "\n".join(stats_lines)
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=9, verticalalignment='top', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -715,23 +725,21 @@ def plot_fio_hist(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_fio_bandwidth(data, output_file, title=None, show=False):
+def plot_fio_bandwidth(data: FioMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
     has_data = False
     if len(data.bw_timestamps_read) > 0 and len(data.bandwidth_read_kbps) > 0:
-        sort_idx = np.argsort(data.bw_timestamps_read)
-        ax.plot(np.array(data.bw_timestamps_read)[sort_idx], 
-                (np.array(data.bandwidth_read_kbps) / 1024.0)[sort_idx], 
-                marker='.', linestyle='none', color='blue', label='Read Bandwidth', alpha=0.7)
+        ax.plot(data.bw_timestamps_read, 
+                np.array(data.bandwidth_read_kbps) / 1024.0, 
+                marker='.', linestyle='-', color='blue', label='Read Bandwidth', alpha=0.7)
         has_data = True
         
     if len(data.bw_timestamps_write) > 0 and len(data.bandwidth_write_kbps) > 0:
-        sort_idx = np.argsort(data.bw_timestamps_write)
-        ax.plot(np.array(data.bw_timestamps_write)[sort_idx], 
-                (np.array(data.bandwidth_write_kbps) / 1024.0)[sort_idx], 
-                marker='.', linestyle='none', color='red', label='Write Bandwidth', alpha=0.7)
+        ax.plot(data.bw_timestamps_write, 
+                np.array(data.bandwidth_write_kbps) / 1024.0, 
+                marker='.', linestyle='-', color='red', label='Write Bandwidth', alpha=0.7)
         has_data = True
 
     if has_data:
@@ -763,15 +771,14 @@ def plot_fio_bandwidth(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_fio_iops(data, output_file, title=None, show=False):
+def plot_fio_iops(data: FioMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
 
     has_data = False
     if len(data.iops_timestamps_read) > 0 and len(data.iops_read) > 0:
-        sort_idx = np.argsort(data.iops_timestamps_read)
-        ax1.plot(np.array(data.iops_timestamps_read)[sort_idx], 
-                 np.array(data.iops_read)[sort_idx], 
+        ax1.plot(data.iops_timestamps_read, 
+                 data.iops_read, 
                  marker='.', linestyle='-', color='blue', label='Read IOPS', alpha=0.7)
         ax1.set_ylabel('Read IOPS', fontsize=12)
         ax1.grid(True)
@@ -783,9 +790,8 @@ def plot_fio_iops(data, output_file, title=None, show=False):
         has_data = True
         
     if len(data.iops_timestamps_write) > 0 and len(data.iops_write) > 0:
-        sort_idx = np.argsort(data.iops_timestamps_write)
-        ax2.plot(np.array(data.iops_timestamps_write)[sort_idx], 
-                 np.array(data.iops_write)[sort_idx], 
+        ax2.plot(data.iops_timestamps_write, 
+                 data.iops_write, 
                  marker='.', linestyle='-', color='red', label='Write IOPS', alpha=0.7)
         ax2.set_ylabel('Write IOPS', fontsize=12)
         ax2.grid(True)
@@ -807,7 +813,7 @@ def plot_fio_iops(data, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_mpstat_interrupts(data, output_file, title=None, show=False):
+def plot_mpstat_interrupts(data: MpstatMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 

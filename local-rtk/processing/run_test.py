@@ -34,8 +34,8 @@ def main():
         dataset.generate_all_plots()
 
     # Duty cycle combination
-    ExperimentPlotter.plot_duty_cycle_combined(datasets, 0, show=True)
-    ExperimentPlotter.plot_duty_cycle_combined(datasets, 1, show=True, y_lim=(49.99, 50.02))
+    ExperimentPlotter.plot_duty_cycle_combined(datasets, 0)
+    ExperimentPlotter.plot_duty_cycle_combined(datasets, 1, y_lim=(49.99, 50.02))
     
 if __name__ == '__main__':
     main()

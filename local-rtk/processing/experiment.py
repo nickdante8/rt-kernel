@@ -215,7 +215,7 @@ class ExperimentProcessor:
             
         if self.dataset.cyclictest:
             title = f"Jitter Distribution CyclicTest ({self.config.test_type} under {self.config.load_type})"
-            proc_plt.plot_histogram_cyclic_test(self.dataset.cyclictest, 
+            proc_plt.plot_histogram_cyclictest(self.dataset.cyclictest, 
                                                 proc_plt.plot_path(self.config, "histogram", "cyclic_test"),
                                                 title, None, show=show)
 
@@ -255,17 +255,17 @@ class ExperimentProcessor:
     def plot_interrupts_stacked_bar(self, show=False):
         if not self.dataset.proc_interrupts:
             return
-            
+        
         active_interrupts = [
-            item for item in self.dataset.proc_interrupts
-            if item.get('delta_total', 0) > 0
+            item for item in self.dataset.proc_interrupts.records
+            if getattr(item, 'delta_total', 0) > 0
         ]
-
+        
         if active_interrupts:
-            num_cpus = len(active_interrupts[0]['delta_cpu'])
+            num_cpus = len(active_interrupts[0].delta_cpu)
             cpu_indices = [f"CPU{i}" for i in range(num_cpus)]
-
-            plot_dict = {f"{item['irq']} ({item['description']})": item['delta_cpu'] for item in active_interrupts}
+            plot_dict = {f"{item.irq} ({item.description})": item.delta_cpu for item in active_interrupts}
+            
             df_matrix = pd.DataFrame(plot_dict, index=cpu_indices)
 
             title = f"Interrupt Load Distribution per Processor Core ({self.config.load_type})"
@@ -277,19 +277,19 @@ class ExperimentProcessor:
         if not self.dataset.vmstat:
             return
         out = proc_plt.plot_path(self.config, 'vmstat_cpu', '')
-        proc_plt.plot_vmstat_cpu({'timestamps': self.dataset.vmstat.timestamps, 'usr': self.dataset.vmstat.usr, 'sys': self.dataset.vmstat.sys, 'idle': self.dataset.vmstat.idle, 'wa': self.dataset.vmstat.wa}, out, title=f'CPU Breakdown Over Time ({self.config.load_type})', show=show)
+        proc_plt.plot_vmstat_cpu(self.dataset.vmstat, out, title=f'CPU Breakdown Over Time ({self.config.load_type})', show=show)
 
     def plot_vmstat_system_activity(self, show=False):
         if not self.dataset.vmstat:
             return
         out = proc_plt.plot_path(self.config, 'vmstat_activity', '')
-        proc_plt.plot_vmstat_system_activity({'timestamps': self.dataset.vmstat.timestamps, 'context_switches': self.dataset.vmstat.context_switches, 'interrupts': self.dataset.vmstat.interrupts}, out, title=f'System Activity Over Time ({self.config.load_type})', show=show)
+        proc_plt.plot_vmstat_system_activity(self.dataset.vmstat, out, title=f'System Activity Over Time ({self.config.load_type})', show=show)
 
     def plot_vmstat_io(self, show=False):
         if not self.dataset.vmstat:
             return
         out = proc_plt.plot_path(self.config, 'vmstat_io', '')
-        proc_plt.plot_vmstat_io({'timestamps': self.dataset.vmstat.timestamps, 'blocks_in': self.dataset.vmstat.blocks_in, 'blocks_out': self.dataset.vmstat.blocks_out}, out, title=f'Disk I/O Activity Over Time ({self.config.load_type})', show=show)
+        proc_plt.plot_vmstat_io(self.dataset.vmstat, out, title=f'Disk I/O Activity Over Time ({self.config.load_type})', show=show)
 
     def plot_mpstat_interrupts(self, show=False):
         if not self.dataset.mpstat:
@@ -313,7 +313,13 @@ class ExperimentProcessor:
         proc_plt.plot_network_throughput(self.dataset.iperf3, out, title=f'Network Throughput Over Time ({self.config.load_type})', show=show)
 
     def plot_fio_hist(self, show=False):
-        if not self.dataset.fio or not self.dataset.fio.clat_ns:
+        if not self.dataset.fio:
+            return
+        
+        has_read = hasattr(self.dataset.fio, 'clat_bins_read') and self.dataset.fio.clat_bins_read
+        has_write = hasattr(self.dataset.fio, 'clat_bins_write') and self.dataset.fio.clat_bins_write
+        
+        if not has_read and not has_write:
             return
         out = proc_plt.plot_path(self.config, 'fio_latency', '')
         proc_plt.plot_fio_hist(self.dataset.fio, out, title=f'FIO Latency Distribution ({self.config.load_type})', show=show)

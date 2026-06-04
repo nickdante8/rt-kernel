@@ -16,6 +16,8 @@ from models import (
     FioMetrics,
     PidstatMetrics,
     VmstatMetrics,
+    ProcInterruptsMetrics,
+    ProcInterruptRecord
 )
 
 def _parse_cyclictest_thread(thread_id, thread_data):
@@ -81,7 +83,7 @@ def cyclictest(data, log_file=None):
     )
 
 def proc_interrupts(start_snap, end_snap, num_cpus):
-    delta_records = []
+    metrics = ProcInterruptsMetrics()
     delta_cpus_total = np.zeros(num_cpus)
     for irq, end_data in end_snap.items():
         # Safeguard in case an interrupt type wasn't present in the start snapshot
@@ -94,17 +96,17 @@ def proc_interrupts(start_snap, end_snap, num_cpus):
         
         # Only keep records where interrupts actually fired to keep the data clean
         if delta_total >= 0:
-            delta_records.append({
-                'irq': irq,
-                'delta_cpu': delta_cpus.tolist(),  # Convert to list for clean DataFrame rendering
-                'delta_total': delta_total,
-                'description': end_data['desc']
-            })
+            metrics.records.append(ProcInterruptRecord(
+                irq=irq,
+                delta_cpu=delta_cpus.tolist(),
+                delta_total=delta_total,
+                description=end_data['desc']
+            ))
     
     # Total counts per CPU
-    delta_records.append({'delta_cpus_total': delta_cpus_total.tolist()})
+    metrics.delta_cpus_total = delta_cpus_total.tolist()
 
-    return delta_records
+    return metrics
 
 def mpstat(statistics: list):
     """Parses mpstat json output into MpstatMetrics."""
@@ -392,43 +394,26 @@ def fio(load_dir: str):
     try:
         with open(summary_file, 'r') as f:
             metrics.summary = json.load(f)
+            # Try to extract json+ clat bins
+            jobs = metrics.summary.get('jobs', [])
+            for job in jobs:
+                if 'read' in job and 'clat_ns' in job['read'] and 'bins' in job['read']['clat_ns']:
+                    bins = job['read']['clat_ns']['bins']
+                    for k, v in sorted([(int(k), v) for k, v in bins.items()]):
+                        metrics.clat_bins_read['latency'].append(k / 1000000.0) # ms
+                        metrics.clat_bins_read['frequency'].append(v)
+                if 'write' in job and 'clat_ns' in job['write'] and 'bins' in job['write']['clat_ns']:
+                    bins = job['write']['clat_ns']['bins']
+                    for k, v in sorted([(int(k), v) for k, v in bins.items()]):
+                        metrics.clat_bins_write['latency'].append(k / 1000000.0) # ms
+                        metrics.clat_bins_write['frequency'].append(v)
     except:
         pass
             
     for i in range(1, 5):
-        clat_file = os.path.join(load_dir, f'fio_latency_clat.{i}.log')
-        slat_file = os.path.join(load_dir, f'fio_latency_slat.{i}.log')
-        lat_file = os.path.join(load_dir, f'fio_latency_lat.{i}.log')
         bw_file = os.path.join(load_dir, f'fio_bw_bw.{i}.log')
         iops_file = os.path.join(load_dir, f'oufio_iops_iops.{i}.log')
-        
-        try:
-            with open(clat_file, 'r') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 2:
-                        metrics.clat_ns.append(int(parts[1].strip()))
-        except:
-            pass
-            
-        try:
-            with open(slat_file, 'r') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 2:
-                        metrics.slat_ns.append(int(parts[1].strip()))
-        except:
-            pass
-            
-        try:
-            with open(lat_file, 'r') as f:
-                for line in f:
-                    parts = line.strip().split(',')
-                    if len(parts) >= 2:
-                        metrics.lat_ns.append(int(parts[1].strip()))
-        except:
-            pass
-            
+                
         try:
             with open(bw_file, 'r') as f:
                 for line in f:
@@ -466,5 +451,26 @@ def fio(load_dir: str):
                             metrics.iops_write.append(iops)
         except:
             pass
+
+    # Sort chronological data    
+    if len(metrics.bw_timestamps_read) > 0:
+        sort_idx = np.argsort(metrics.bw_timestamps_read)
+        metrics.bw_timestamps_read = list(np.array(metrics.bw_timestamps_read)[sort_idx])
+        metrics.bandwidth_read_kbps = list(np.array(metrics.bandwidth_read_kbps)[sort_idx])
+        
+    if len(metrics.bw_timestamps_write) > 0:
+        sort_idx = np.argsort(metrics.bw_timestamps_write)
+        metrics.bw_timestamps_write = list(np.array(metrics.bw_timestamps_write)[sort_idx])
+        metrics.bandwidth_write_kbps = list(np.array(metrics.bandwidth_write_kbps)[sort_idx])
+        
+    if len(metrics.iops_timestamps_read) > 0:
+        sort_idx = np.argsort(metrics.iops_timestamps_read)
+        metrics.iops_timestamps_read = list(np.array(metrics.iops_timestamps_read)[sort_idx])
+        metrics.iops_read = list(np.array(metrics.iops_read)[sort_idx])
+        
+    if len(metrics.iops_timestamps_write) > 0:
+        sort_idx = np.argsort(metrics.iops_timestamps_write)
+        metrics.iops_timestamps_write = list(np.array(metrics.iops_timestamps_write)[sort_idx])
+        metrics.iops_write = list(np.array(metrics.iops_write)[sort_idx])
             
     return metrics

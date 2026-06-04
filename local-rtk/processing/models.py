@@ -111,9 +111,8 @@ class Iperf3Metrics:
 
 @dataclass
 class FioMetrics:
-    clat_ns: List[int] = field(default_factory=list)
-    slat_ns: List[int] = field(default_factory=list)
-    lat_ns: List[int] = field(default_factory=list)
+    clat_bins_read: Dict[str, list] = field(default_factory=lambda: {'latency': [], 'frequency': []})
+    clat_bins_write: Dict[str, list] = field(default_factory=lambda: {'latency': [], 'frequency': []})
     bandwidth_kbps: List[float] = field(default_factory=list)
     bandwidth_read_kbps: List[float] = field(default_factory=list)
     bandwidth_write_kbps: List[float] = field(default_factory=list)
@@ -149,13 +148,25 @@ class PidstatMetrics:
     pid_nvcswch: Dict[str, np.ndarray]
 
 @dataclass
+class ProcInterruptRecord:
+    irq: str
+    description: str
+    delta_cpu: List[float]
+    delta_total: float
+
+@dataclass
+class ProcInterruptsMetrics:
+    records: List[ProcInterruptRecord] = field(default_factory=list)
+    delta_cpus_total: List[float] = field(default_factory=list)
+
+@dataclass
 class ExperimentDataset:
     """Unified container representing a complete processed test run."""
     config: ExperimentConfig
     saleae: Dict[int, SaleaeSignalMetrics] = field(default_factory=dict)
     saleae_common: Optional[SaleaeCrossMetrics] = None
     cyclictest: Optional[CyclictestMetrics] = None
-    proc_interrupts: Optional[List[Dict[str, Any]]] = None
+    proc_interrupts: Optional[ProcInterruptsMetrics] = None
     mpstat: Optional[MpstatMetrics] = None
     vmstat: Optional[VmstatMetrics] = None
     pidstat: Optional[PidstatMetrics] = None
