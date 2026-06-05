@@ -496,7 +496,7 @@ def plot_vmstat_cpu(data: VmstatMetrics, output_file, title=None, label=None, sh
     ax.set_ylabel('CPU Usage %', fontsize=12)
     ax.set_ylim(0, 100)
     
-    ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
+    ax.legend(loc='upper right')
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"vmstat CPU plot saved to '{output_file}'")
@@ -509,8 +509,8 @@ def plot_vmstat_system_activity(data: VmstatMetrics, output_file, title=None, sh
     fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
 
-    ax1.plot(data.timestamps, data.context_switches, color='blue', alpha=0.7, label='Total System Context Switches', linewidth=2)
-    ax2.plot(data.timestamps, data.interrupts, color='red', alpha=0.7, label='Total System Interrupts', linewidth=2)
+    ax1.plot(data.timestamps, data.context_switches, color='blue', alpha=0.7, label=f"Total System Context Switches (Avg: {np.mean(data.context_switches):.0f} cs/s)", linewidth=2)
+    ax2.plot(data.timestamps, data.interrupts, color='red', alpha=0.7, label=f"Total System Interrupts (Avg: {np.mean(data.interrupts):.0f} /s)", linewidth=2)
 
     ax1.set_title(title if title else "Total System Activity (vmstat)", fontsize=16)
     ax1.set_xlabel('Time (s)', fontsize=12)
@@ -519,7 +519,7 @@ def plot_vmstat_system_activity(data: VmstatMetrics, output_file, title=None, sh
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower right')
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -539,7 +539,7 @@ def plot_vmstat_io(data: VmstatMetrics, output_file, title=None, show=False):
     ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('Blocks / sec', fontsize=12)
 
-    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
+    ax.legend(loc='upper left')
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"vmstat IO plot saved to '{output_file}'")
@@ -560,7 +560,7 @@ def plot_pid_cpu(data: PidstatMetrics, output_file, title=None, show=False):
     ax.set_title(title if title else "Process CPU Usage", fontsize=16)
     ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('CPU Usage %', fontsize=12)
-    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
+    ax.legend(loc='upper left')
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"pidstat CPU plot saved to '{output_file}'")
@@ -589,7 +589,7 @@ def plot_pid_cswch(data: PidstatMetrics, output_file, title=None, show=False):
     ax.set_title(title if title else "Process Context Switches", fontsize=16)
     ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('Context Switches / sec', fontsize=12)
-    ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
+    ax.legend(loc='upper left')
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"pidstat CS plot saved to '{output_file}'")
@@ -857,7 +857,7 @@ def plot_mpstat_interrupts(data: MpstatMetrics, output_file, title=None, show=Fa
             ax.set_title(title if title else "Selected System Interrupts (mpstat)", fontsize=16)
             ax.set_xlabel('Time (s)', fontsize=12)
             ax.set_ylabel('Interrupts / sec', fontsize=12)
-            ax.legend(loc='best')
+            ax.legend(loc='upper left')
             plt.tight_layout()
             plt.savefig(output_file, dpi=300, bbox_inches='tight')
             print(f"mpstat interrupts plot saved to '{output_file}'")
@@ -870,9 +870,12 @@ def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None,
     plt.style.use('ggplot')
     
     has_saleae = dataset.saleae_common is not None and len(dataset.saleae_common.time_axis) > 0
+    has_saleae_duty = dataset.saleae is not None and 0 in dataset.saleae and len(dataset.saleae[0].duty_cycles) > 0
     has_iperf3 = dataset.iperf3 is not None and len(dataset.iperf3.timestamps) > 0
+    has_mpstat = dataset.mpstat is not None and len(dataset.mpstat.cores) > 0
+    has_vmstat = dataset.vmstat is not None and len(dataset.vmstat.timestamps) > 0
     
-    panes = sum([has_saleae, has_iperf3])
+    panes = sum([has_saleae, has_saleae_duty, has_iperf3, has_mpstat | has_vmstat])
     if panes < 2:
         print("Not enough data streams to plot correlation.")
         return
@@ -883,16 +886,67 @@ def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None,
         
     ax_idx = 0
     
-    if has_saleae:
+    if has_saleae and has_mpstat:
         ax = axes[ax_idx]
         ax_idx += 1
+        ax2 = ax.twinx()
+
+        def mpstat_intern_plot(ax1):
+            core_all = dataset.mpstat.cores['all']
+            interesting_irqs = ['51', '74', '180', 'IPI0', 'IPI1']
+            
+            irq_mapping = {
+                '51': '51 (dwc_otg_sim-fiq)',
+                '74': '74 (dwc_otg_hcd:usb1)',
+                '180': '180 (arch_timer)',
+                'IPI0': 'IPI0 (Rescheduling interrupts)',
+                'IPI1': 'IPI1 (Function call interrupts)',
+            }
+
+            plotted = 0
+            for irq_name, values in core_all.individual_interrupts.items():
+                if any(interesting.lower() in irq_name.lower() for interesting in interesting_irqs) or np.mean(values) > 100:
+                    avg_val = np.mean(values)
+                    if avg_val > 0:
+                        # Get formatted name if available
+                        label_name = irq_mapping.get(irq_name.upper(), irq_name)
+                        ax1.plot(core_all.timestamps, values, marker='.', linestyle='solid', alpha=0.7, label=f"{label_name} (Avg: {avg_val:.1f}/s)")
+                        plotted += 1
+
+            ax1.set_ylabel('Interrupts / sec', fontsize=12)
+
         # Convert latency to microseconds. Note: Saleae latency = t_SW - t_HW
         jitter = np.array(dataset.saleae_common.latency) 
-        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (SW - HW)')
+        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (SW - HW pin)')
+
+        mpstat_intern_plot(ax2)
+
         ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
         ax.grid(True)
-        ax.legend(loc='upper right')
-        ax.set_title("Hardware Interrupt Layer (Saleae)", fontsize=14)
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='center left')
+        ax.set_title("Latency between pin channels (Saleae) and interrupts frequency (mpstat)", fontsize=14)
+        
+    if has_saleae_duty:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        
+        ch_soft = 0
+        if ch_soft in dataset.saleae:
+            signal_soft = dataset.saleae[ch_soft]
+            ax.plot(signal_soft.time_pulse, signal_soft.duty_cycles, color='orange', marker='.', linestyle='solid', alpha=0.7, label='Software PWM Duty Cycle')
+        
+        if 1 in dataset.saleae:
+            signal_hard = dataset.saleae[1]
+            ax.plot(signal_hard.time_pulse, signal_hard.duty_cycles, color='blue', marker='.', linestyle='solid', alpha=0.5, label='Hardware PWM Duty Cycle')
+
+        ax.set_ylabel('Duty Cycle (%)', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='best')
+        ax.set_title("Pulse Duty Cycle", fontsize=14)
         
     if has_iperf3:
         ax = axes[ax_idx]
@@ -912,6 +966,26 @@ def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None,
         ax.grid(True)
         ax.set_title("Application Layer (Iperf3)", fontsize=14)
         ax.set_ylim(bottom=0)
+    
+    if has_mpstat:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        ax2 = ax.twinx()
+
+        ax.plot(dataset.vmstat.timestamps, dataset.vmstat.context_switches, color='blue', alpha=0.7, label=f"Total System Context Switches (Avg: {np.mean(dataset.vmstat.context_switches):.0f} cs/s)", linewidth=2)
+        ax2.plot(dataset.vmstat.timestamps, dataset.vmstat.interrupts, color='red', alpha=0.7, label=f"Total System Interrupts (Avg: {np.mean(dataset.vmstat.interrupts):.0f} /s)", linewidth=2)
+
+        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_ylabel('Context Switches / sec', color='blue', fontsize=12)
+        ax2.set_ylabel('Interrupts / sec', color='red', fontsize=12)
+
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='lower right')
+
+        ax.grid(True)
+        ax.set_title("System Interrupts (mpstat) and Activity (vmstat)", fontsize=14)
+        ax.set_ylim(bottom=0)
 
     # Set common X-axis label on the bottom pane
     axes[-1].set_xlabel('Time (s)', fontsize=14)
@@ -924,4 +998,211 @@ def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None,
     
     if show:
         plt.show()
+    plt.close(fig)
+
+def plot_network_correlation(dataset: ExperimentDataset, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    has_saleae = dataset.saleae_common is not None and len(dataset.saleae_common.time_axis) > 0
+    has_iperf3 = dataset.iperf3 is not None and len(dataset.iperf3.timestamps) > 0
+    has_mpstat = dataset.mpstat is not None
+    
+    panes = sum([has_saleae | has_mpstat, has_iperf3])
+    if panes < 2:
+        return
+        
+    fig, axes = plt.subplots(panes, 1, figsize=(14, 4 * panes), sharex=True)
+    ax_idx = 0
+    
+    if has_saleae and has_mpstat:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        jitter = np.array(dataset.saleae_common.latency)
+        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (us)')
+        
+        ax2 = ax.twinx()
+        if dataset.mpstat is not None and len(dataset.mpstat.cores) > 0:
+            core_all = dataset.mpstat.cores['all']
+            # Plot only network IRQs if possible, else 74 (usb/net)
+            for irq_name, values in core_all.individual_interrupts.items():
+                if '74' in irq_name or 'eth' in irq_name.lower():
+                    avg_val = np.mean(values)
+                    ax2.plot(core_all.timestamps, values, color='red', marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: {avg_val:.1f}/s)')
+            ax2.set_ylabel('Network IRQs / sec', color='red', fontsize=12)
+            
+        ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
+        ax.grid(True)
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        ax.set_title("Hardware Jitter vs Network IRQs", fontsize=14)
+        
+    if has_iperf3:
+        ax = axes[ax_idx]
+        ax.plot(dataset.iperf3.timestamps, dataset.iperf3.rtt, color='green', marker='.', linestyle='-', alpha=0.7, label='Network RTT')
+        ax.set_ylabel('RTT Latency (us)', color='green', fontsize=12)
+        ax.set_ylim(bottom=0)
+        
+        ax2 = ax.twinx()
+        ax2.plot(dataset.iperf3.timestamps, dataset.iperf3.retransmits, color='red', marker='x', linestyle='None', alpha=0.7, label='Retransmits')
+        ax2.set_ylabel('Retransmits', color='red', fontsize=12)
+        ax2.set_ylim(bottom=0)
+        
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        ax.grid(True)
+        ax.set_title("Network TCP Performance", fontsize=14)
+        
+    axes[-1].set_xlabel('Time (s)', fontsize=14)
+    
+    if has_saleae and has_iperf3:
+        jitter = np.array(dataset.saleae_common.latency)
+        stats_text = (
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+            f"Network (Iperf3): Avg RTT {np.mean(dataset.iperf3.rtt):.2f} us, Total Retransmits {np.sum(dataset.iperf3.retransmits)}"
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='top', horizontalalignment='right', bbox=props)
+                     
+    plt.suptitle(title if title else "Network Determinism Correlation", fontsize=16)
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    if show: plt.show()
+    plt.close(fig)
+
+def plot_storage_correlation(dataset: ExperimentDataset, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    has_saleae = dataset.saleae_common is not None and len(dataset.saleae_common.time_axis) > 0
+    has_fio = dataset.fio is not None and (len(dataset.fio.bw_sec_write) > 0 or len(dataset.fio.bw_sec_read) > 0)
+    has_mpstat = dataset.mpstat is not None
+    
+    panes = sum([has_saleae | has_mpstat, has_fio])
+    if panes < 2:
+        return
+        
+    fig, axes = plt.subplots(panes, 1, figsize=(14, 4 * panes), sharex=True)
+    ax_idx = 0
+    
+    if has_saleae and has_mpstat:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        jitter = np.array(dataset.saleae_common.latency)
+        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (us)')
+        
+        ax2 = ax.twinx()
+        if dataset.mpstat is not None and len(dataset.mpstat.cores) > 0:
+            core_all = dataset.mpstat.cores['all']
+            for irq_name, values in core_all.individual_interrupts.items():
+                if '51' in irq_name or 'mmc' in irq_name.lower():
+                    avg_val = np.mean(values)
+                    ax2.plot(core_all.timestamps, values, color='red', marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: f{avg_val:.1f}/s)')
+            ax2.set_ylabel('Storage IRQs / sec', color='red', fontsize=12)
+            
+        ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
+        ax.grid(True)
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        ax.set_title("Hardware Jitter vs Storage IRQs", fontsize=14)
+        
+    if has_fio:
+        ax = axes[ax_idx]
+        if len(dataset.fio.bw_sec_write) > 0:
+            ax.plot(dataset.fio.bw_sec_write, dataset.fio.bw_kbps_write, color='blue', marker='.', alpha=0.7, label='FIO Write BW')
+        elif len(dataset.fio.bw_sec_read) > 0:
+            ax.plot(dataset.fio.bw_sec_read, dataset.fio.bw_kbps_read, color='blue', marker='.', alpha=0.7, label='FIO Read BW')
+        
+        ax.set_ylabel('Bandwidth (KB/s)', color='blue', fontsize=12)
+        ax.set_ylim(bottom=0)
+        ax.grid(True)
+        ax.legend(loc='upper left')
+        ax.set_title("Storage Performance (Time-Series Latency Missing, showing BW)", fontsize=14)
+        
+    axes[-1].set_xlabel('Time (s)', fontsize=14)
+    
+    if has_saleae and has_fio:
+        jitter = np.array(dataset.saleae_common.latency)
+        bw_avg = np.mean(dataset.fio.bw_kbps_write) if len(dataset.fio.bw_sec_write) > 0 else np.mean(dataset.fio.bw_kbps_read) if len(dataset.fio.bw_sec_read) > 0 else 0
+        stats_text = (
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+            f"Storage (FIO): Avg Bandwidth {bw_avg:.2f} KB/s"
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='top', horizontalalignment='right', bbox=props)
+                     
+    plt.suptitle(title if title else "Storage Determinism Correlation", fontsize=16)
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    if show: plt.show()
+    plt.close(fig)
+
+def plot_system_correlation(dataset: ExperimentDataset, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    has_saleae = dataset.saleae_common is not None and len(dataset.saleae_common.time_axis) > 0
+    has_mpstat = dataset.mpstat is not None
+    has_vmstat = dataset.vmstat is not None and len(dataset.vmstat.timestamps) > 0
+    
+    panes = sum([has_saleae | has_mpstat, has_vmstat])
+    if panes < 2:
+        return
+        
+    fig, axes = plt.subplots(panes, 1, figsize=(14, 4 * panes), sharex=True)
+    ax_idx = 0
+    
+    if has_saleae and has_mpstat:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        jitter = np.array(dataset.saleae_common.latency)
+        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (us)')
+        
+        ax2 = ax.twinx()
+        if dataset.mpstat is not None and len(dataset.mpstat.cores) > 0:
+            core_all = dataset.mpstat.cores['all']
+            for irq_name, values in core_all.individual_interrupts.items():
+                if ('ipi' in irq_name.lower() or '180' in irq_name) and (np.mean(values) > 0):
+                    avg_val = np.mean(values)
+                    ax2.plot(core_all.timestamps, values, marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: {avg_val:.1f}/s)')
+            ax2.set_ylabel('System/Timer IRQs / sec', fontsize=12)
+            
+        ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
+        ax.grid(True)
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        ax.set_title("Hardware Jitter vs System IRQs", fontsize=14)
+        
+    if has_vmstat:
+        ax = axes[ax_idx]
+        ax.plot(dataset.vmstat.timestamps, dataset.vmstat.context_switches, color='blue', alpha=0.7, label=f"Context Switches (Avg: {np.mean(dataset.vmstat.context_switches):.0f} cs/s)")
+        ax.set_ylabel('CS / sec', color='blue', fontsize=12)
+        ax.set_ylim(bottom=0)
+        
+        ax2 = ax.twinx()
+        ax2.plot(dataset.vmstat.timestamps, dataset.vmstat.usr + dataset.vmstat.sys, color='red', alpha=0.7, label=f"Total CPU Usage (Avg: {np.mean(dataset.vmstat.usr + dataset.vmstat.sys):.1f} %)")
+        ax2.set_ylabel('CPU Usage (%)', color='red', fontsize=12)
+        ax2.set_ylim(bottom=0, top=105)
+        
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        ax.grid(True)
+        ax.set_title("System Context Switches and CPU Usage", fontsize=14)
+        
+    axes[-1].set_xlabel('Time (s)', fontsize=14)
+    
+    if has_saleae and has_vmstat:
+        jitter = np.array(dataset.saleae_common.latency)
+        stats_text = (
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+        )
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='top', horizontalalignment='right', bbox=props)
+                     
+    plt.suptitle(title if title else "System Overhead Correlation", fontsize=16)
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    if show: plt.show()
     plt.close(fig)

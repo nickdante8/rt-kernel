@@ -241,6 +241,11 @@ class ExperimentProcessor:
         self.plot_fio_hist(show)
         self.plot_fio_bandwidth(show)
         self.plot_fio_iops(show)
+
+        self.plot_jitter_correlation(show)
+        self.plot_network_correlation(show)
+        self.plot_storage_correlation(show)
+        self.plot_system_correlation(show)
         
     def plot_histograms(self, show=False):
         for ch in self.config.channels:
@@ -390,6 +395,24 @@ class ExperimentProcessor:
             return
         out = proc_plt.plot_path(self.config, 'jitter_correlation', '')
         proc_plt.plot_jitter_correlation(self.dataset, out, title=f'Full Stack Jitter Correlation ({self.config.load_type})', show=show)
+
+    def plot_network_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.iperf3:
+            return
+        out = proc_plt.plot_path(self.config, 'network_correlation', '')
+        proc_plt.plot_network_correlation(self.dataset, out, title=f'Network Determinism Correlation ({self.config.load_type})', show=show)
+
+    def plot_storage_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.fio:
+            return
+        out = proc_plt.plot_path(self.config, 'storage_correlation', '')
+        proc_plt.plot_storage_correlation(self.dataset, out, title=f'Storage Determinism Correlation ({self.config.load_type})', show=show)
+
+    def plot_system_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'system_correlation', '')
+        proc_plt.plot_system_correlation(self.dataset, out, title=f'System Overhead Correlation ({self.config.load_type})', show=show)
 
 class ExperimentPlotter:
     @staticmethod
