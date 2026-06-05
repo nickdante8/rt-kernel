@@ -3,22 +3,44 @@ Parsers for raw Linux profiling artifacts used by the processing pipeline.
 """
 import pandas as pd
 import numpy as np
+import glob
+import collections
 import os
 import json
 import math
+from datetime import datetime, timedelta
 
 from models import (
-    CyclictestMetrics,
     CyclictestThreadMetrics,
-    MpstatMetrics,
+    CyclictestMetrics,
+    PidstatMetrics,
+    ProcInterruptRecord,
+    ProcInterruptsMetrics,
     CpuTimelineMetrics,
+    MpstatMetrics,
+    VmstatMetrics,
     Iperf3Metrics,
     FioMetrics,
-    PidstatMetrics,
-    VmstatMetrics,
-    ProcInterruptsMetrics,
-    ProcInterruptRecord
+    FioJobMetrics,
+    FioLatencyStats
 )
+
+def _parse_relative_time(time_str: str, t_0_wall: float) -> float:
+    if not t_0_wall:
+        return 0.0
+    t_0_dt = datetime.fromtimestamp(t_0_wall)
+    try:
+        if len(time_str.split()) == 2:
+            dt = datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S")
+        else:
+            t_obj = datetime.strptime(time_str, "%H:%M:%S").time()
+            dt = datetime.combine(t_0_dt.date(), t_obj)
+            if dt.hour < 12 and t_0_dt.hour > 12:
+                dt += timedelta(days=1)
+        return (dt - t_0_dt).total_seconds()
+    except Exception:
+        return 0.0
+
 
 def _parse_cyclictest_thread(thread_id, thread_data):
     """Parse a single cyclictest thread into CyclictestThreadMetrics."""
@@ -108,7 +130,7 @@ def proc_interrupts(start_snap, end_snap, num_cpus):
 
     return metrics
 
-def mpstat(statistics: list):
+def mpstat(statistics: list, t_0_wall: float = 0.0):
     """Parses mpstat json output into MpstatMetrics."""
     if not statistics:
         return None
@@ -206,6 +228,13 @@ def mpstat(statistics: list):
                     all_indiv[irq_name] = [0.0] * num_timestamps
                 for i in range(min(num_timestamps, len(values))):
                     all_indiv[irq_name][i] += values[i]
+                    
+    if t_0_wall > 0.0:
+        for core in cores_dict.values():
+            core.timestamps = [_parse_relative_time(ts, t_0_wall) for ts in core.timestamps]
+    else:
+        for core in cores_dict.values():
+            core.timestamps = [float(i) for i in range(len(core.timestamps))]
     
     return output
 
@@ -235,7 +264,7 @@ def parse_led_toggle_edges(filepath: str) -> float:
         pass
     return 0.0
 
-def vmstat(filepath: str):
+def vmstat(filepath: str, t_0_wall: float = 0.0):
     """Parses vmstat.log."""    
     timestamps = []
     cs = []
@@ -275,6 +304,11 @@ def vmstat(filepath: str):
     if not timestamps:
         return None
         
+    if t_0_wall > 0.0:
+        timestamps = [_parse_relative_time(ts, t_0_wall) for ts in timestamps]
+    else:
+        timestamps = [float(i) for i in range(len(timestamps))]
+        
     return VmstatMetrics(
         timestamps=np.array(timestamps),
         context_switches=np.array(cs),
@@ -290,7 +324,7 @@ def vmstat(filepath: str):
         blocks_out=np.array(bo)
     )
 
-def pidstat(filepath: str):
+def pidstat(filepath: str, t_0_wall: float = 0.0):
     timestamps = []
     pid_cpu = {}
     pid_cswch = {}
@@ -338,6 +372,11 @@ def pidstat(filepath: str):
     if not timestamps:
         return None
         
+    if t_0_wall > 0.0:
+        timestamps = [_parse_relative_time(ts, t_0_wall) for ts in timestamps]
+    else:
+        timestamps = [float(i) for i in range(len(timestamps))]
+        
     for k in pid_cpu:
         pid_cpu[k] = np.array(pid_cpu[k])
     for k in pid_cswch:
@@ -351,7 +390,7 @@ def pidstat(filepath: str):
         pid_nvcswch=pid_nvcswch
     )
 
-def iperf3(filepath: str):
+def iperf3(filepath: str, t_0_wall: float = 0.0):
     try:
         with open(filepath, 'r') as f:
             data = json.load(f)
@@ -362,9 +401,12 @@ def iperf3(filepath: str):
         retransmits = []
         rtt = []
         
+        start_time_sec = data.get('start', {}).get('timestamp', {}).get('timesecs', 0.0)
+        delay = start_time_sec - t_0_wall if t_0_wall > 0.0 and start_time_sec > 0.0 else 0.0
+        
         for interval in intervals:
             sum_data = interval.get('sum', {})
-            timestamps.append(sum_data.get('end', 0.0))
+            timestamps.append(sum_data.get('end', 0.0) + delay)
             bits_per_second.append(sum_data.get('bits_per_second', 0.0))
             retransmits.append(sum_data.get('retransmits', 0))
             
@@ -394,83 +436,103 @@ def fio(load_dir: str):
     try:
         with open(summary_file, 'r') as f:
             metrics.summary = json.load(f)
-            # Try to extract json+ clat bins
+            
+            def parse_latency_stats(lat_json):
+                if not lat_json:
+                    return FioLatencyStats()
+                return FioLatencyStats(
+                    min=lat_json.get('min', 0.0),
+                    max=lat_json.get('max', 0.0),
+                    mean=lat_json.get('mean', 0.0),
+                    stddev=lat_json.get('stddev', 0.0)
+                )
+
+            def parse_job_metrics(job_data):
+                if not job_data:
+                    return FioJobMetrics()
+                
+                jm = FioJobMetrics(
+                    io_kbytes=job_data.get('io_kbytes', 0),
+                    bw=job_data.get('bw', 0.0),
+                    iops=job_data.get('iops', 0.0),
+                    total_ios=job_data.get('total_ios', 0),
+                    drop_ios=job_data.get('drop_ios', 0),
+                    bw_dev=job_data.get('bw_dev', 0.0),
+                    iops_stddev=job_data.get('iops_stddev', 0.0),
+                    slat_ns=parse_latency_stats(job_data.get('slat_ns', {})),
+                    clat_ns=parse_latency_stats(job_data.get('clat_ns', {})),
+                    lat_ns=parse_latency_stats(job_data.get('lat_ns', {}))
+                )
+                
+                if 'clat_ns' in job_data and 'bins' in job_data['clat_ns']:
+                    bins = job_data['clat_ns']['bins']
+                    for k, v in sorted([(int(k), v) for k, v in bins.items()]):
+                        jm.clat_ms.append(k / 1000000.0)
+                        jm.cfreq.append(v)
+                return jm
+
             jobs = metrics.summary.get('jobs', [])
             for job in jobs:
-                if 'read' in job and 'clat_ns' in job['read'] and 'bins' in job['read']['clat_ns']:
-                    bins = job['read']['clat_ns']['bins']
-                    for k, v in sorted([(int(k), v) for k, v in bins.items()]):
-                        metrics.clat_bins_read['latency'].append(k / 1000000.0) # ms
-                        metrics.clat_bins_read['frequency'].append(v)
-                if 'write' in job and 'clat_ns' in job['write'] and 'bins' in job['write']['clat_ns']:
-                    bins = job['write']['clat_ns']['bins']
-                    for k, v in sorted([(int(k), v) for k, v in bins.items()]):
-                        metrics.clat_bins_write['latency'].append(k / 1000000.0) # ms
-                        metrics.clat_bins_write['frequency'].append(v)
-    except:
-        pass
+                if 'read' in job and job['read'].get('total_ios', 0) > 0:
+                    metrics.read_metrics = parse_job_metrics(job['read'])
+                if 'write' in job and job['write'].get('total_ios', 0) > 0:
+                    metrics.write_metrics = parse_job_metrics(job['write'])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
             
-    for i in range(1, 5):
-        bw_file = os.path.join(load_dir, f'fio_bw_bw.{i}.log')
-        iops_file = os.path.join(load_dir, f'oufio_iops_iops.{i}.log')
-                
+    bw_read_buckets = collections.defaultdict(float)
+    bw_write_buckets = collections.defaultdict(float)
+    iops_read_buckets = collections.defaultdict(float)
+    iops_write_buckets = collections.defaultdict(float)
+    
+    bw_files = glob.glob(os.path.join(load_dir, 'fio_bw_bw.*.log'))
+    iops_files = glob.glob(os.path.join(load_dir, 'oufio_iops_iops.*.log'))
+
+    for bw_file in bw_files:
         try:
             with open(bw_file, 'r') as f:
                 for line in f:
                     parts = line.strip().split(',')
                     if len(parts) >= 3:
-                        time_ms = float(parts[0].strip()) / 1000.0  # seconds
+                        time_sec = int(float(parts[0].strip()) / 1000.0)
                         bw = float(parts[1].strip())
                         direction = int(parts[2].strip())
                         
-                        metrics.bandwidth_kbps.append(bw)
                         if direction == 0:
-                            metrics.bw_timestamps_read.append(time_ms)
-                            metrics.bandwidth_read_kbps.append(bw)
+                            bw_read_buckets[time_sec] += bw
                         elif direction == 1:
-                            metrics.bw_timestamps_write.append(time_ms)
-                            metrics.bandwidth_write_kbps.append(bw)
+                            bw_write_buckets[time_sec] += bw
         except:
             pass
 
+    for iops_file in iops_files:
         try:
             with open(iops_file, 'r') as f:
                 for line in f:
                     parts = line.strip().split(',')
                     if len(parts) >= 3:
-                        time_ms = float(parts[0].strip()) / 1000.0  # seconds
+                        time_sec = int(float(parts[0].strip()) / 1000.0)
                         iops = float(parts[1].strip())
                         direction = int(parts[2].strip())
-                        
-                        metrics.iops.append(iops)
                         if direction == 0:
-                            metrics.iops_timestamps_read.append(time_ms)
-                            metrics.iops_read.append(iops)
+                            iops_read_buckets[time_sec] += iops
                         elif direction == 1:
-                            metrics.iops_timestamps_write.append(time_ms)
-                            metrics.iops_write.append(iops)
+                            iops_write_buckets[time_sec] += iops
         except:
             pass
-
-    # Sort chronological data    
-    if len(metrics.bw_timestamps_read) > 0:
-        sort_idx = np.argsort(metrics.bw_timestamps_read)
-        metrics.bw_timestamps_read = list(np.array(metrics.bw_timestamps_read)[sort_idx])
-        metrics.bandwidth_read_kbps = list(np.array(metrics.bandwidth_read_kbps)[sort_idx])
-        
-    if len(metrics.bw_timestamps_write) > 0:
-        sort_idx = np.argsort(metrics.bw_timestamps_write)
-        metrics.bw_timestamps_write = list(np.array(metrics.bw_timestamps_write)[sort_idx])
-        metrics.bandwidth_write_kbps = list(np.array(metrics.bandwidth_write_kbps)[sort_idx])
-        
-    if len(metrics.iops_timestamps_read) > 0:
-        sort_idx = np.argsort(metrics.iops_timestamps_read)
-        metrics.iops_timestamps_read = list(np.array(metrics.iops_timestamps_read)[sort_idx])
-        metrics.iops_read = list(np.array(metrics.iops_read)[sort_idx])
-        
-    if len(metrics.iops_timestamps_write) > 0:
-        sort_idx = np.argsort(metrics.iops_timestamps_write)
-        metrics.iops_timestamps_write = list(np.array(metrics.iops_timestamps_write)[sort_idx])
-        metrics.iops_write = list(np.array(metrics.iops_write)[sort_idx])
             
+    for sec, val in sorted(bw_read_buckets.items()):
+        metrics.bw_sec_read.append(sec)
+        metrics.bw_kbps_read.append(val)
+    for sec, val in sorted(bw_write_buckets.items()):
+        metrics.bw_sec_write.append(sec)
+        metrics.bw_kbps_write.append(val)
+        
+    for sec, val in sorted(iops_read_buckets.items()):
+        metrics.iops_sec_read.append(sec)
+        metrics.iops_count_read.append(val)
+    for sec, val in sorted(iops_write_buckets.items()):
+        metrics.iops_sec_write.append(sec)
+        metrics.iops_count_write.append(val)
+        
     return metrics

@@ -10,7 +10,8 @@ from models import (
     Iperf3Metrics,
     FioMetrics,
     VmstatMetrics,
-    PidstatMetrics
+    PidstatMetrics,
+    ExperimentDataset
 )
 
 def plot_path(obj, type, name, combined=False):
@@ -130,7 +131,7 @@ def plot_histogram_combined(data: SaleaeSignalMetrics, output_file, title=None, 
     Generates and saves a histogram of the jitter data.
     """
     plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(12, 7))
+    fig, ax1 = plt.subplots(figsize=(12, 6))
     ax2 = ax1.twinx()
 
     # Create the histogram
@@ -190,7 +191,7 @@ def plot_histogram_cyclictest(data: CyclictestMetrics, output_file, title=None, 
     Each thread (CPU) is rendered as a separate semi-transparent bar series.
     """
     plt.style.use('ggplot')
-    fig, ax = plt.subplots(figsize=(14, 8))
+    fig, ax = plt.subplots(figsize=(12, 7))
 
     # Color palette for up to 4 CPUs (housekeeping vs isolated distinction)
     colors = ['#2196F3', '#4CAF50', '#FF5722', '#9C27B0']
@@ -243,7 +244,7 @@ def plot_histogram_cyclictest(data: CyclictestMetrics, output_file, title=None, 
 
 def plot_phase_shift_combined(data: SaleaeCrossMetrics, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
     
     # for phase in phase_idle.values():
@@ -278,7 +279,7 @@ def plot_phase_shift_combined(data: SaleaeCrossMetrics, output_file, title=None,
 
 def plot_signal_drift(data: SaleaeSignalMetrics, output_file, title=None, label=None, show=False):
     plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
     
     # for phase in phase_idle.values():
@@ -313,7 +314,7 @@ def plot_signal_drift(data: SaleaeSignalMetrics, output_file, title=None, label=
 
 def plot_signal_drift_combined(data1: SaleaeSignalMetrics, data2: SaleaeSignalMetrics, output_file, title=None, lable=None, show=False):
     plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+    fig, ax1 = plt.subplots(figsize=(12, 7))
     ax2 = ax1.twinx()
 
     # for phase in phase_idle.values():
@@ -491,14 +492,9 @@ def plot_vmstat_cpu(data: VmstatMetrics, output_file, title=None, label=None, sh
                  colors=['#2ca02c', '#1f77b4', '#d62728', '#e377c2'], alpha=0.8)
 
     ax.set_title(title if title else "CPU Breakdown Over Time", fontsize=16)
-    ax.set_xlabel('Time', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('CPU Usage %', fontsize=12)
     ax.set_ylim(0, 100)
-    
-    if len(data.timestamps) > 0:
-        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
-        ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
     
     ax.legend(loc='upper right', bbox_to_anchor=(1.15, 1))
     plt.tight_layout()
@@ -517,14 +513,9 @@ def plot_vmstat_system_activity(data: VmstatMetrics, output_file, title=None, sh
     ax2.plot(data.timestamps, data.interrupts, color='red', alpha=0.7, label='Total System Interrupts', linewidth=2)
 
     ax1.set_title(title if title else "Total System Activity (vmstat)", fontsize=16)
-    ax1.set_xlabel('Time', fontsize=12)
+    ax1.set_xlabel('Time (s)', fontsize=12)
     ax1.set_ylabel('Context Switches / sec', color='blue', fontsize=12)
     ax2.set_ylabel('Interrupts / sec', color='red', fontsize=12)
-    
-    if len(data.timestamps) > 0:
-        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
-        ax1.set_xticks(xticks_idx)
-        ax1.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
@@ -545,13 +536,8 @@ def plot_vmstat_io(data: VmstatMetrics, output_file, title=None, show=False):
     ax.plot(data.timestamps, data.blocks_out, color='orange', alpha=0.8, label='Blocks Out (Write)')
 
     ax.set_title(title if title else "Disk I/O Activity (vmstat)", fontsize=16)
-    ax.set_xlabel('Time', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('Blocks / sec', fontsize=12)
-    
-    if len(data.timestamps) > 0:
-        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
-        ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
 
     ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1))
     plt.tight_layout()
@@ -572,14 +558,8 @@ def plot_pid_cpu(data: PidstatMetrics, output_file, title=None, show=False):
             ax.plot(data.timestamps[:min_len], cpu_array[:min_len], marker='.', label=f'{cmd} (Avg: {avg_cpu:.1f}%)')
 
     ax.set_title(title if title else "Process CPU Usage", fontsize=16)
-    ax.set_xlabel('Time', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('CPU Usage %', fontsize=12)
-    
-    if len(data.timestamps) > 0:
-        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
-        ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
-
     ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -607,14 +587,8 @@ def plot_pid_cswch(data: PidstatMetrics, output_file, title=None, show=False):
                 ax.plot(data.timestamps[:min_len_nv], nvcswch_array[:min_len_nv], marker='x', linestyle='--', color=colors[idx], label=f'{cmd} Non-Vol (Avg: {avg_nvcswch:.1f}/s)')
 
     ax.set_title(title if title else "Process Context Switches", fontsize=16)
-    ax.set_xlabel('Time', fontsize=12)
+    ax.set_xlabel('Time (s)', fontsize=12)
     ax.set_ylabel('Context Switches / sec', fontsize=12)
-    
-    if len(data.timestamps) > 0:
-        xticks_idx = np.linspace(0, len(data.timestamps) - 1, min(10, len(data.timestamps)), dtype=int)
-        ax.set_xticks(xticks_idx)
-        ax.set_xticklabels([data.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
-
     ax.legend(loc='upper left', bbox_to_anchor=(1.01, 1))
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -625,37 +599,56 @@ def plot_pid_cswch(data: PidstatMetrics, output_file, title=None, show=False):
 
 def plot_network_throughput(data: Iperf3Metrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
-    fig, ax1 = plt.subplots(figsize=(12, 7))
-    ax2 = ax1.twinx()
+    fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
 
     bps = np.array(data.bits_per_second) / 1_000_000  # Mbps
-    ax1.plot(data.timestamps, bps, color='blue', alpha=0.8, marker='o', label='Throughput (Mbps)')
-    ax2.plot(data.timestamps, data.retransmits, color='red', alpha=0.8, marker='x', linestyle='--', label='Retransmits')
-
-    ax1.set_title(title if title else "Network Throughput (iperf3)", fontsize=16)
-    ax1.set_xlabel('Time (s)', fontsize=12)
-    ax1.set_ylabel('Throughput (Mbps)', color='blue', fontsize=12)
-    ax2.set_ylabel('Retransmits', color='red', fontsize=12)
     
-    # Scale Y axis to keep retransmits below throughput
+    # Top Pane: Throughput
+    ax1.plot(data.timestamps, bps, color='blue', alpha=0.8, marker='.', label='Throughput (Mbps)')
+    ax1.set_title(title if title else "Network Performance (iperf3)", fontsize=16)
+    ax1.set_ylabel('Throughput (Mbps)', color='blue', fontsize=12)
+    ax1.grid(True)
+    ax1.legend(loc='upper left')
     max_bps = np.max(bps) if len(bps) > 0 else 100
     ax1.set_ylim(bottom=0, top=max_bps * 1.5)
-    max_retransmits = np.max(data.retransmits) if len(data.retransmits) > 0 else 0
-    ax2.set_ylim(bottom=0, top=max(10, max_retransmits * 4))
     
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-
     if len(bps) > 0:
-        stats_text = (
-            f"Avg Throughput: {np.mean(bps):.1f} Mbps\n"
-            f"Min Throughput: {np.min(bps):.1f} Mbps\n"
-            f"Max Throughput: {np.max(bps):.1f} Mbps\n"
-            f"Total Retransmits: {np.sum(data.retransmits)}"
-        )
+        stats_lines = []
+        stats_lines.append(f"Avg Throughput: {np.mean(bps):.1f} Mbps")
+        stats_lines.append(f"Max Throughput: {np.max(bps):.1f} Mbps")
+        if data.cpu_util_host is not None:
+            stats_lines.append(f"CPU Overhead: {data.cpu_util_host:.1f}%")
+            
+        stats_text = "\n".join(stats_lines)
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
         ax1.text(0.98, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', horizontalalignment='right', bbox=props)
+
+    # Bottom Pane: RTT (Latency) + Retransmits
+    ax3.plot(data.timestamps, data.rtt, color='green', alpha=0.8, marker='.', label='RTT (us)')
+    ax3.set_ylabel('Round Trip Time (us)', color='green', fontsize=12)
+    ax3.set_xlabel('Time (s)', fontsize=12)
+    ax3.grid(True)
+    ax3.set_ylim(bottom=0)
+    
+    ax4 = ax3.twinx()
+    ax4.plot(data.timestamps, data.retransmits, color='red', alpha=0.8, marker='x', linestyle='None', label='Retransmits')
+    ax4.set_ylabel('Retransmits', color='red', fontsize=12)
+    
+    max_retransmits = np.max(data.retransmits) if len(data.retransmits) > 0 else 0
+    ax4.set_ylim(bottom=0, top=max(5, max_retransmits * 3))
+    
+    lines3, labels3 = ax3.get_legend_handles_labels()
+    lines4, labels4 = ax4.get_legend_handles_labels()
+    ax3.legend(lines3 + lines4, labels3 + labels4, loc='upper left')
+    
+    if len(data.rtt) > 0:
+        stats_text_rtt = (
+            f"Avg RTT: {np.mean(data.rtt):.1f} us\n"
+            f"Max RTT: {np.max(data.rtt):.1f} us\n"
+            f"Total Retransmits: {np.sum(data.retransmits)}"
+        )
+        props_rtt = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+        ax3.text(0.98, 0.95, stats_text_rtt, transform=ax3.transAxes, fontsize=10, verticalalignment='top', horizontalalignment='right', bbox=props_rtt)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -667,26 +660,35 @@ def plot_network_throughput(data: Iperf3Metrics, output_file, title=None, show=F
 def plot_fio_hist(data: FioMetrics, output_file, title=None, show=False):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
-
+    
+    has_read = data.read_metrics.total_ios > 0
+    has_write = data.write_metrics.total_ios > 0
     stats_lines = []
 
-    def process_bins(bins_data, color, label):
-        if not bins_data:
+    def process_job_metrics(jm, color, label, ax):
+        if not jm.clat_ms:
             return
             
-        bins_ms = bins_data['latency']
-        counts = bins_data['frequency']
+        bins_ms = jm.clat_ms
+        counts = jm.cfreq
         
         total_samples = sum(counts)
         if total_samples == 0:
             return
             
-        sum_lat = sum(l * c for l, c in zip(bins_ms, counts))
+        # Since we are no longer using a logarithmic scale, we want a fixed, uniform width 
+        # for all bars so they look perfectly consistent.
+        # We calculate a consistent width based on the visible span of the data.
+        if len(bins_ms) > 1:
+            bar_width = max((bins_ms[-1] - bins_ms[0]) / 130.0, 0.001)
+        else:
+            bar_width = 1.0
+            
+        # Plot using ax.bar with consistent widths
+        ax.bar(bins_ms, counts, width=bar_width, color=color, alpha=0.6, align='center', edgecolor='black', linewidth=0.5, label=label)
         
-        # Plot using ax.bar as requested
-        ax.bar(bins_ms, counts, width=1.0, color=color, alpha=0.6, align='edge', edgecolor='black', linewidth=0.5, label=label)
-        
-        mean_cus = sum_lat / total_samples
+        # Use exact mean from JSON
+        mean_cus = jm.clat_ns.mean / 1000000.0 if jm.clat_ns.mean else sum(l * c for l, c in zip(bins_ms, counts)) / total_samples
         ax.axvline(mean_cus, color=color, linestyle='--', linewidth=2, label=f'Mean {label}: {mean_cus:.2f} ms')
         
         cumulative = 0
@@ -698,25 +700,29 @@ def plot_fio_hist(data: FioMetrics, output_file, title=None, show=False):
                 break
                 
         stats_lines.append(f"--- {label} ---")
-        stats_lines.append(f"Samples: {total_samples}")
-        stats_lines.append(f"Mean: {mean_cus:.2f} ms")
-        stats_lines.append(f"Max: {bins_ms[-1]:.2f} ms")
-        stats_lines.append(f"99th: {p99:.2f} ms")
+        stats_lines.append(f"Total IOs: {jm.total_ios}")
+        stats_lines.append(f"Avg BW: {jm.bw:.1f} KB/s")
+        stats_lines.append(f"Avg IOPS: {jm.iops:.1f}")
+        stats_lines.append(f"Mean Clat: {mean_cus:.2f} ms")
+        stats_lines.append(f"Max Clat: {jm.clat_ns.max / 1000000.0:.2f} ms")
+        stats_lines.append(f"99th Clat: {p99:.2f} ms")
 
-    process_bins(data.clat_bins_read, '#2196F3', 'Read (clat)')
-    process_bins(data.clat_bins_write, '#FF5722', 'Write (clat)')
+    if has_read:
+        process_job_metrics(data.read_metrics, '#2196F3', 'Read', ax)
+    if has_write:
+        process_job_metrics(data.write_metrics, '#FF5722', 'Write', ax)
 
-    ax.set_xscale('log')
-    ax.set_title(title if title else "FIO Latency Distribution", fontsize=16)
-    ax.set_xlabel('Latency (ms) - Log Scale', fontsize=12)
-    ax.set_ylabel('Count', fontsize=12)
-    ax.grid(True)
-    ax.legend(loc='upper right')
+    if has_read or has_write:
+        ax.set_title(title if title else "Latency Distribution", fontsize=16)
+        ax.set_xlabel('Latency (ms)', fontsize=12)
+        ax.set_ylabel('Count', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='upper right')
 
-    if stats_lines:
-        stats_text = "\n".join(stats_lines)
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=9, verticalalignment='top', bbox=props)
+        if stats_lines:
+            stats_text = "\n".join(stats_lines)
+            props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+            ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=9, verticalalignment='top', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -725,40 +731,41 @@ def plot_fio_hist(data: FioMetrics, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_fio_bandwidth(data: FioMetrics, output_file, title=None, show=False):
+def plot_fio_bandwidth(data: FioMetrics, output_file, title=None, show=False, y_lim=None):
     plt.style.use('ggplot')
     fig, ax = plt.subplots(figsize=(12, 7))
 
     has_data = False
-    if len(data.bw_timestamps_read) > 0 and len(data.bandwidth_read_kbps) > 0:
-        ax.plot(data.bw_timestamps_read, 
-                np.array(data.bandwidth_read_kbps) / 1024.0, 
-                marker='.', linestyle='-', color='blue', label='Read Bandwidth', alpha=0.7)
+    stats_lines = []
+    if len(data.bw_sec_read) > 0 and len(data.bw_kbps_read) > 0:
+        ax.plot(data.bw_sec_read, 
+                np.array(data.bw_kbps_read), 
+                marker='.', linestyle='-', color='blue', label='Total Read Bandwidth', alpha=0.7)
+        stats_lines.append(f"Avg Read: {np.mean(data.bw_kbps_read):.2f} KB/s")
+        stats_lines.append(f"Max Read: {np.max(data.bw_kbps_read):.2f} KB/s")
         has_data = True
         
-    if len(data.bw_timestamps_write) > 0 and len(data.bandwidth_write_kbps) > 0:
-        ax.plot(data.bw_timestamps_write, 
-                np.array(data.bandwidth_write_kbps) / 1024.0, 
-                marker='.', linestyle='-', color='red', label='Write Bandwidth', alpha=0.7)
+    if len(data.bw_sec_write) > 0 and len(data.bw_kbps_write) > 0:
+        ax.plot(data.bw_sec_write, 
+                np.array(data.bw_kbps_write), 
+                marker='.', linestyle='-', color='red', label='Total Write Bandwidth', alpha=0.7)
+        stats_lines.append(f"Avg Write: {np.mean(data.bw_kbps_write):.2f} KB/s")
+        stats_lines.append(f"Max Write: {np.max(data.bw_kbps_write):.2f} KB/s")
         has_data = True
 
     if has_data:
-        ax.set_title(title if title else "FIO USB Bandwidth (Read/Write)", fontsize=16)
+        ax.set_title(title if title else "Total Aggregated FIO Bandwidth", fontsize=16)
         ax.set_xlabel('Time (s)', fontsize=12)
-        ax.set_ylabel('Bandwidth (MB/s)', fontsize=12)
+        ax.set_ylabel('Bandwidth (KB/s)', fontsize=12)
         ax.grid(True)
         ax.legend(loc='best')
         
-        stats_lines = []
-        if len(data.bandwidth_read_kbps) > 0:
-            read_mbps = np.array(data.bandwidth_read_kbps) / 1024.0
-            stats_lines.append(f"Avg Read: {np.mean(read_mbps):.2f} MB/s")
-            stats_lines.append(f"Max Read: {np.max(read_mbps):.2f} MB/s")
-        if len(data.bandwidth_write_kbps) > 0:
-            write_mbps = np.array(data.bandwidth_write_kbps) / 1024.0
-            stats_lines.append(f"Avg Write: {np.mean(write_mbps):.2f} MB/s")
-            stats_lines.append(f"Max Write: {np.max(write_mbps):.2f} MB/s")
-            
+        # Anchor Y-axis to 0 to "zoom out" and show stability relative to zero
+        if y_lim:
+            ax.set_ylim(y_lim)
+        else:
+            ax.set_ylim(bottom=0)
+        
         if stats_lines:
             stats_text = "\n".join(stats_lines)
             props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
@@ -771,40 +778,47 @@ def plot_fio_bandwidth(data: FioMetrics, output_file, title=None, show=False):
         plt.show()
     plt.close(fig)
 
-def plot_fio_iops(data: FioMetrics, output_file, title=None, show=False):
+def plot_fio_iops(data: FioMetrics, output_file, title=None, show=False, y_lim=None):
     plt.style.use('ggplot')
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10), sharex=True)
+    fig, ax = plt.subplots(figsize=(12, 7))
 
     has_data = False
-    if len(data.iops_timestamps_read) > 0 and len(data.iops_read) > 0:
-        ax1.plot(data.iops_timestamps_read, 
-                 data.iops_read, 
-                 marker='.', linestyle='-', color='blue', label='Read IOPS', alpha=0.7)
-        ax1.set_ylabel('Read IOPS', fontsize=12)
-        ax1.grid(True)
-        ax1.legend(loc='upper right')
+    stats_lines = []
+    if len(data.iops_sec_read) > 0 and len(data.iops_count_read) > 0:
+        ax.plot(data.iops_sec_read, 
+                 data.iops_count_read, 
+                 marker='.', linestyle='-', color='blue', label='Total Read IOPS', alpha=0.7)
         
-        stats_text = f"Avg Read: {np.mean(data.iops_read):.1f}\nMax Read: {np.max(data.iops_read):.1f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        stats_lines.append(f"Avg Read: {np.mean(data.iops_count_read):.1f}")
+        stats_lines.append(f"Max Read: {np.max(data.iops_count_read):.1f}")
         has_data = True
         
-    if len(data.iops_timestamps_write) > 0 and len(data.iops_write) > 0:
-        ax2.plot(data.iops_timestamps_write, 
-                 data.iops_write, 
-                 marker='.', linestyle='-', color='red', label='Write IOPS', alpha=0.7)
-        ax2.set_ylabel('Write IOPS', fontsize=12)
-        ax2.grid(True)
-        ax2.legend(loc='upper right')
+    if len(data.iops_sec_write) > 0 and len(data.iops_count_write) > 0:
+        ax.plot(data.iops_sec_write, 
+                 data.iops_count_write, 
+                 marker='.', linestyle='-', color='red', label='Total Write IOPS', alpha=0.7)
         
-        stats_text = f"Avg Write: {np.mean(data.iops_write):.1f}\nMax Write: {np.max(data.iops_write):.1f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        ax2.text(0.02, 0.95, stats_text, transform=ax2.transAxes, fontsize=10, verticalalignment='top', bbox=props)
+        stats_lines.append(f"Avg Write: {np.mean(data.iops_count_write):.1f}")
+        stats_lines.append(f"Max Write: {np.max(data.iops_count_write):.1f}")
         has_data = True
 
     if has_data:
-        fig.suptitle(title if title else "FIO USB IOPS", fontsize=16)
-        ax2.set_xlabel('Time (s)', fontsize=12)
+        ax.set_title(title if title else "Total Aggregated IOPS", fontsize=16)
+        ax.set_xlabel('Time (s)', fontsize=12)
+        ax.set_ylabel('Read/Write IOPS', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='best')
+
+        # Anchor Y-axis to 0 to "zoom out" and show stability relative to zero
+        if y_lim:
+            ax.set_ylim(y_lim)
+        else:
+            ax.set_ylim(bottom=0)
+
+        if stats_lines:
+            stats_text = "\n".join(stats_lines)
+            props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+            ax.text(0.02, 0.95, stats_text, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -841,18 +855,72 @@ def plot_mpstat_interrupts(data: MpstatMetrics, output_file, title=None, show=Fa
 
         if plotted > 0:
             ax.set_title(title if title else "Selected System Interrupts (mpstat)", fontsize=16)
-            ax.set_xlabel('Time', fontsize=12)
+            ax.set_xlabel('Time (s)', fontsize=12)
             ax.set_ylabel('Interrupts / sec', fontsize=12)
-            
-            if len(core_all.timestamps) > 0:
-                xticks_idx = np.linspace(0, len(core_all.timestamps) - 1, min(10, len(core_all.timestamps)), dtype=int)
-                ax.set_xticks(xticks_idx)
-                ax.set_xticklabels([core_all.timestamps[i].split()[-1] for i in xticks_idx], rotation=45)
-
             ax.legend(loc='best')
             plt.tight_layout()
             plt.savefig(output_file, dpi=300, bbox_inches='tight')
             print(f"mpstat interrupts plot saved to '{output_file}'")
+    
+    if show:
+        plt.show()
+    plt.close(fig)
+
+def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None, show=False):
+    plt.style.use('ggplot')
+    
+    has_saleae = dataset.saleae_common is not None and len(dataset.saleae_common.time_axis) > 0
+    has_iperf3 = dataset.iperf3 is not None and len(dataset.iperf3.timestamps) > 0
+    
+    panes = sum([has_saleae, has_iperf3])
+    if panes < 2:
+        print("Not enough data streams to plot correlation.")
+        return
+        
+    fig, axes = plt.subplots(panes, 1, figsize=(14, 4 * panes), sharex=True)
+    if panes == 1:
+        axes = [axes]
+        
+    ax_idx = 0
+    
+    if has_saleae:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        # Convert latency to microseconds. Note: Saleae latency = t_SW - t_HW
+        jitter = np.array(dataset.saleae_common.latency) 
+        ax.plot(dataset.saleae_common.time_axis, jitter, color='purple', marker='.', linestyle='dashed', alpha=0.7, label='Hardware Jitter (SW - HW)')
+        ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
+        ax.grid(True)
+        ax.legend(loc='upper right')
+        ax.set_title("Hardware Interrupt Layer (Saleae)", fontsize=14)
+        
+    if has_iperf3:
+        ax = axes[ax_idx]
+        ax_idx += 1
+        ax.plot(dataset.iperf3.timestamps, dataset.iperf3.rtt, color='green', marker='.', linestyle='-', alpha=0.7, label='Network RTT')
+        ax.set_ylabel('RTT Latency (us)', color='green', fontsize=12)
+        
+        ax2 = ax.twinx()
+        ax2.plot(dataset.iperf3.timestamps, dataset.iperf3.retransmits, color='red', marker='x', linestyle='None', alpha=0.7, label='Retransmits')
+        ax2.set_ylabel('Retransmits', color='red', fontsize=12)
+        ax2.set_ylim(bottom=0)
+        
+        lines1, labels1 = ax.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+        
+        ax.grid(True)
+        ax.set_title("Application Layer (Iperf3)", fontsize=14)
+        ax.set_ylim(bottom=0)
+
+    # Set common X-axis label on the bottom pane
+    axes[-1].set_xlabel('Time (s)', fontsize=14)
+    
+    fig.suptitle(title if title else "Full Stack Jitter Correlation Dashboard", fontsize=18)
+    
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=300, bbox_inches='tight')
+    print(f"Correlation dashboard saved to '{output_file}'")
     
     if show:
         plt.show()

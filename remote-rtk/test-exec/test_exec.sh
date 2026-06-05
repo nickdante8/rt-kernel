@@ -278,8 +278,12 @@ main() {
     echo "=== Executing Test: ${TEST_TYPE_FOLDER_NAME}, ${LOAD_TYPE} ==="
 
     # Temporary
-    cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"
-$(date +%Y-%m-%d-%H:%M:%S.%N)
+    SYNC_WALL=$(date +'%Y-%m-%d-%H:%M:%S.%N')
+    SYNC_MONO=$(awk '{print $1}' /proc/uptime)
+
+    cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/test_exec.log"
+SYNC_WALL: ${SYNC_WALL}
+SYNC_MONO: ${SYNC_MONO}
 
 # Save kernel version
 $(uname -a)
@@ -298,8 +302,9 @@ EOF
     test_stop "${LOAD_TYPE}"
 
     # Temporary
-    cat <<EOF >> "${OUTPUT_DIR}/${LOAD_TYPE}/log_file.log"
-$(date +%Y-%m-%d-%H:%M:%S.%N)
+    cat <<EOF >> "${OUTPUT_DIR}/${LOAD_TYPE}/test_exec.log"
+SYNC_WALL_END: ${SYNC_WALL}
+SYNC_MONO_END: ${SYNC_MONO}
 EOF
 
     echo "========================================"

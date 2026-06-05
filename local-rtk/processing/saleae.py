@@ -92,9 +92,9 @@ def timing_analysis(obj: ExperimentConfig, df, time_col, channel_col):
 
     return SaleaeSignalMetrics(
         reference_time=t0,
-        time_jitter_rise=time_jitter_rise,
-        time_jitter_fall=time_jitter_fall,
-        time_pulse=time_pulse,
+        time_jitter_rise=time_jitter_rise / 1000000,
+        time_jitter_fall=time_jitter_fall / 1000000,
+        time_pulse=time_pulse / 1000000,
         nominal_period_us=obj.nominal_period_us,
         edges_rise=rising_us,
         edges_fall=falling_us,
@@ -128,5 +128,5 @@ def phase_shift_analysis(edges0, edges1, nominal_period_us):
     return SaleaeCrossMetrics(
         latency=latency,
         phase=phase_diff,
-        time_axis=edges0[:min_len]
+        time_axis=edges0[:min_len] / 1000000
     )
