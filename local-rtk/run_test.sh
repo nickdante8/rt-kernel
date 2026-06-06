@@ -51,6 +51,16 @@ setup_environment() {
         echo "ERROR: Could not connect to RPI at '${RPI_USER}@${RPI_HOST}' via SSH with the provided password."
         exit 1
     fi
+
+    echo "Synchronizing local timezone and time to the RPI..."
+    local_timestamp=$(date +%s)
+    local_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "UTC")
+    
+    sshpass -f .sshpass ssh -o StrictHostKeyChecking=no -q "${RPI_USER}@${RPI_HOST}" \
+        "echo '$(cat .sshpass)' | sudo -S timedatectl set-ntp false && \
+        sudo timedatectl set-timezone ${local_tz} && \
+        sudo date -s '@${local_timestamp}' && sudo \
+        timedatectl set-ntp true" || echo "Warning: Failed to sync time to RPI."
 }
 
 # This section will parse command-line arguments and override any values
