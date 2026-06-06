@@ -56,7 +56,11 @@ setup_environment() {
     local_timestamp=$(date +%s)
     local_tz=$(timedatectl show -p Timezone --value 2>/dev/null || echo "UTC")
     
-    sshpass -f .sshpass ssh -o StrictHostKeyChecking=no -q "${RPI_USER}@${RPI_HOST}" "sudo timedatectl set-ntp false && sudo timedatectl set-timezone ${local_tz} && sudo date -s '@${local_timestamp}' && sudo timedatectl set-ntp true" || echo "Warning: Failed to sync time to RPI."
+    sshpass -f .sshpass ssh -o StrictHostKeyChecking=no -q "${RPI_USER}@${RPI_HOST}" \
+        "echo '$(cat .sshpass)' | sudo -S timedatectl set-ntp false && \
+        sudo timedatectl set-timezone ${local_tz} && \
+        sudo date -s '@${local_timestamp}' && sudo \
+        timedatectl set-ntp true" || echo "Warning: Failed to sync time to RPI."
 }
 
 # This section will parse command-line arguments and override any values
