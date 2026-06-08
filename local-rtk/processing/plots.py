@@ -267,6 +267,22 @@ def plot_phase_shift_combined(data: SaleaeCrossMetrics, output_file, title=None,
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
+    stats_lines = []
+    stats_lines.append(
+        f"Latency:\n"
+        f"Min={np.min(data.latency):.2f} µs\n"
+        f"Max={np.max(data.latency):.2f} µs\n"
+        f"Avg={np.mean(data.latency):.2f} µs\n\n"
+        f"Phase:\n"
+        f"Min={np.min(data.phase):.2f} deg\n"
+        f"Max={np.max(data.phase):.2f} deg\n"
+        f"Avg={np.mean(data.phase):.2f} deg"
+    )
+    stats_text = "\n".join(stats_lines)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=9,
+            verticalalignment='top', bbox=props)
+
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Histogram saved to '{output_file}'")
@@ -302,6 +318,19 @@ def plot_signal_drift(data: SaleaeSignalMetrics, output_file, title=None, label=
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
+    diff = data.drifts_rise - data.drifts_fall
+    stats_lines = []
+    stats_lines.append(
+        f"Rise/Fall difference:\n"
+        f"Min={np.min(diff):.2f} µs\n"
+        f"Max={np.max(diff):.2f} µs\n"
+        f"Avg={np.mean(diff):.2f} µs"
+    )
+    stats_text = "\n".join(stats_lines)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=9,
+            verticalalignment='top', bbox=props)
+
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"Histogram saved to '{output_file}'")
@@ -336,6 +365,19 @@ def plot_signal_drift_combined(data1: SaleaeSignalMetrics, data2: SaleaeSignalMe
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
+
+    diff = data1.drifts_rise - data2.drifts_rise
+    stats_lines = []
+    stats_lines.append(
+        f"Drift difference:\n"
+        f"Min={np.min(diff):.2f} µs\n"
+        f"Max={np.max(diff):.2f} µs\n"
+        f"Avg={np.mean(diff):.2f} µs"
+    )
+    stats_text = "\n".join(stats_lines)
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax1.text(0.05, 0.95, stats_text, transform=ax1.transAxes, fontsize=9,
+            verticalalignment='top', bbox=props)
 
     # Save the figure to a file
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -984,7 +1026,7 @@ def plot_jitter_correlation(dataset: ExperimentDataset, output_file, title=None,
         ax.legend(lines1 + lines2, labels1 + labels2, loc='lower right')
 
         ax.grid(True)
-        ax.set_title("System Interrupts (mpstat) and Activity (vmstat)", fontsize=14)
+        ax.set_title("System Activity (vmstat)", fontsize=14)
         ax.set_ylim(bottom=0)
 
     # Set common X-axis label on the bottom pane
@@ -1058,12 +1100,12 @@ def plot_network_correlation(dataset: ExperimentDataset, output_file, title=None
     if has_saleae and has_iperf3:
         jitter = np.array(dataset.saleae_common.latency)
         stats_text = (
-            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max/Min {np.max(jitter):.2f}/{np.min(jitter):.2f} us\n"
             f"Network (Iperf3): Avg RTT {np.mean(dataset.iperf3.rtt):.2f} us, Total Retransmits {np.sum(dataset.iperf3.retransmits)}"
         )
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
-                     verticalalignment='top', horizontalalignment='right', bbox=props)
+        axes[0].text(0.38, 0.09, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='bottom', horizontalalignment='right', bbox=props)
                      
     plt.suptitle(title if title else "Network Determinism Correlation", fontsize=16)
     plt.tight_layout()
@@ -1125,13 +1167,13 @@ def plot_storage_correlation(dataset: ExperimentDataset, output_file, title=None
         jitter = np.array(dataset.saleae_common.latency)
         bw_avg = np.mean(dataset.fio.bw_kbps_write) if len(dataset.fio.bw_sec_write) > 0 else np.mean(dataset.fio.bw_kbps_read) if len(dataset.fio.bw_sec_read) > 0 else 0
         stats_text = (
-            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max/Min {np.max(jitter):.2f}/{np.min(jitter):.2f} us\n"
             f"Storage (FIO): Avg Bandwidth {bw_avg:.2f} KB/s"
         )
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
-                     verticalalignment='top', horizontalalignment='right', bbox=props)
-                     
+        axes[0].text(0.38, 0.09, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='bottom', horizontalalignment='right', bbox=props)
+        
     plt.suptitle(title if title else "Storage Determinism Correlation", fontsize=16)
     plt.tight_layout()
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
@@ -1195,11 +1237,11 @@ def plot_system_correlation(dataset: ExperimentDataset, output_file, title=None,
     if has_saleae and has_vmstat:
         jitter = np.array(dataset.saleae_common.latency)
         stats_text = (
-            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max {np.max(jitter):.2f} us\n"
+            f"Hardware Jitter: Avg {np.mean(jitter):.2f} us, Max/Min {np.max(jitter):.2f}/{np.min(jitter):.2f} us\n"
         )
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        axes[0].text(0.98, 0.95, stats_text, transform=axes[0].transAxes, fontsize=11,
-                     verticalalignment='top', horizontalalignment='right', bbox=props)
+        axes[0].text(0.38, 0.09, stats_text, transform=axes[0].transAxes, fontsize=11,
+                     verticalalignment='bottom', horizontalalignment='right', bbox=props)
                      
     plt.suptitle(title if title else "System Overhead Correlation", fontsize=16)
     plt.tight_layout()

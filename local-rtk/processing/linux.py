@@ -403,10 +403,12 @@ def iperf3(filepath: str, t_0_wall: float = 0.0):
         
         start_time_sec = data.get('start', {}).get('timestamp', {}).get('timesecs', 0.0)
         delay = start_time_sec - t_0_wall if t_0_wall > 0.0 and start_time_sec > 0.0 else 0.0
+        if delay > 0.0:
+            delay = delay * -1.0
         
         for interval in intervals:
             sum_data = interval.get('sum', {})
-            timestamps.append(sum_data.get('end', 0.0) + delay)
+            timestamps.append(sum_data.get('start', 0.0) + delay)
             bits_per_second.append(sum_data.get('bits_per_second', 0.0))
             retransmits.append(sum_data.get('retransmits', 0))
             
@@ -429,9 +431,10 @@ def iperf3(filepath: str, t_0_wall: float = 0.0):
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
-def fio(load_dir: str):
+def fio(load_dir: str, t_0_wall: float = 0.0):
     metrics = FioMetrics()
     
+    delay = 0.0
     summary_file = os.path.join(load_dir, 'fio_summary.json')
     try:
         with open(summary_file, 'r') as f:
@@ -473,6 +476,11 @@ def fio(load_dir: str):
 
             jobs = metrics.summary.get('jobs', [])
             for job in jobs:
+                if 'job_start' in job:
+                    start_timestamp = float(job['job_start'] / 1000.0)
+                    delay = start_timestamp - t_0_wall if t_0_wall > 0.0 and start_timestamp > 0.0 else 0.0
+                    if delay > 0.0:
+                        delay = delay * -1.0
                 if 'read' in job and job['read'].get('total_ios', 0) > 0:
                     metrics.read_metrics = parse_job_metrics(job['read'])
                 if 'write' in job and job['write'].get('total_ios', 0) > 0:
@@ -494,7 +502,7 @@ def fio(load_dir: str):
                 for line in f:
                     parts = line.strip().split(',')
                     if len(parts) >= 3:
-                        time_sec = int(float(parts[0].strip()) / 1000.0)
+                        time_sec = int((float(parts[0].strip()) + delay) / 1000.0)
                         bw = float(parts[1].strip())
                         direction = int(parts[2].strip())
                         
@@ -511,7 +519,7 @@ def fio(load_dir: str):
                 for line in f:
                     parts = line.strip().split(',')
                     if len(parts) >= 3:
-                        time_sec = int(float(parts[0].strip()) / 1000.0)
+                        time_sec = int((float(parts[0].strip()) - delay) / 1000.0)
                         iops = float(parts[1].strip())
                         direction = int(parts[2].strip())
                         if direction == 0:

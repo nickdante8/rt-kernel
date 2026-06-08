@@ -45,7 +45,7 @@ class ExperimentProcessor:
         self.dataset.pidstat = proc_linux.pidstat(os.path.join(self.config.input_dir, self.config.load_type, 'pidstat.log'), t_0_wall)
         self.dataset.vmstat = proc_linux.vmstat(os.path.join(self.config.input_dir, self.config.load_type, 'vmstat.log'), t_0_wall)
         self.dataset.iperf3 = proc_linux.iperf3(os.path.join(self.config.input_dir, self.config.load_type, 'network_results.json'), t_0_wall)
-        self.dataset.fio = proc_linux.fio(os.path.join(self.config.input_dir, self.config.load_type))
+        self.dataset.fio = proc_linux.fio(os.path.join(self.config.input_dir, self.config.load_type), t_0_wall)
 
     def _extract_analysis_saleae(self):
         csv_path = os.path.join(self.config.input_dir, self.config.load_type, "digital.csv")
@@ -393,25 +393,25 @@ class ExperimentProcessor:
     def plot_jitter_correlation(self, show=False):
         if not self.dataset.saleae_common and not self.dataset.cyclictest and not self.dataset.iperf3:
             return
-        out = proc_plt.plot_path(self.config, 'jitter_correlation', '')
+        out = proc_plt.plot_path(self.config, 'correlation_jitter', '')
         proc_plt.plot_jitter_correlation(self.dataset, out, title=f'Full Stack Jitter Correlation ({self.config.load_type})', show=show)
 
     def plot_network_correlation(self, show=False):
         if not self.dataset.saleae_common or not self.dataset.iperf3:
             return
-        out = proc_plt.plot_path(self.config, 'network_correlation', '')
+        out = proc_plt.plot_path(self.config, 'correlation_network', '')
         proc_plt.plot_network_correlation(self.dataset, out, title=f'Network Determinism Correlation ({self.config.load_type})', show=show)
 
     def plot_storage_correlation(self, show=False):
         if not self.dataset.saleae_common or not self.dataset.fio:
             return
-        out = proc_plt.plot_path(self.config, 'storage_correlation', '')
+        out = proc_plt.plot_path(self.config, 'correlation_storage', '')
         proc_plt.plot_storage_correlation(self.dataset, out, title=f'Storage Determinism Correlation ({self.config.load_type})', show=show)
 
     def plot_system_correlation(self, show=False):
         if not self.dataset.saleae_common or not self.dataset.vmstat:
             return
-        out = proc_plt.plot_path(self.config, 'system_correlation', '')
+        out = proc_plt.plot_path(self.config, 'correlation_system', '')
         proc_plt.plot_system_correlation(self.dataset, out, title=f'System Overhead Correlation ({self.config.load_type})', show=show)
 
 class ExperimentPlotter:
