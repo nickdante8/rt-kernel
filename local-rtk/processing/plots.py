@@ -366,7 +366,8 @@ def plot_signal_drift_combined(data1: SaleaeSignalMetrics, data2: SaleaeSignalMe
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='best')
 
-    diff = data1.drifts_rise - data2.drifts_rise
+    min_len = min(len(data1.drifts_rise), len(data2.drifts_rise))
+    diff = data1.drifts_rise[:min_len] - data2.drifts_rise[:min_len]
     stats_lines = []
     stats_lines.append(
         f"Drift difference:\n"
