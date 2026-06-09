@@ -3,9 +3,9 @@ import json
 import os
 import re
 import numpy as np
-from typing import Any
+from datetime import datetime
 
-from models import ExperimentConfig, ExperimentDataset
+from models import ExperimentConfig, ExperimentDataset, SyncMetadata
 import plots as proc_plt
 import saleae as proc_sl
 import linux as proc_linux
@@ -35,9 +35,17 @@ class ExperimentProcessor:
 
     def load_and_process_datas(self):
         self._extract_analysis_saleae()
+        self._extract_analysis_sync()
+        
+        t_0_wall = self.dataset.sync_metadata.t_0_wall if self.dataset.sync_metadata else 0.0
+        
         self.dataset.cyclictest = self._extract_analysis_cyclictest()
         self.dataset.proc_interrupts = self._extract_analysis_interrupts()
-        self.dataset.mpstat = self._extract_analysis_mpstat()
+        self.dataset.mpstat = self._extract_analysis_mpstat(t_0_wall)
+        self.dataset.pidstat = proc_linux.pidstat(os.path.join(self.config.input_dir, self.config.load_type, 'pidstat.log'), t_0_wall)
+        self.dataset.vmstat = proc_linux.vmstat(os.path.join(self.config.input_dir, self.config.load_type, 'vmstat.log'), t_0_wall)
+        self.dataset.iperf3 = proc_linux.iperf3(os.path.join(self.config.input_dir, self.config.load_type, 'network_results.json'), t_0_wall)
+        self.dataset.fio = proc_linux.fio(os.path.join(self.config.input_dir, self.config.load_type), t_0_wall)
 
     def _extract_analysis_saleae(self):
         csv_path = os.path.join(self.config.input_dir, self.config.load_type, "digital.csv")
@@ -55,7 +63,11 @@ class ExperimentProcessor:
 
             if matched_idx is not None:
                 print(f"Successfully matched graph channel {ch} to column '{matched_col}'")
-                self.dataset.saleae[ch] = proc_sl.timing_analysis(self.config, df, columns[0], matched_col)
+                result = proc_sl.timing_analysis(self.config, df, columns[0], matched_col)
+                if isinstance(result, dict) and 'error' in result:
+                    print(f"Error processing channel {ch}: {result['error']}")
+                else:
+                    self.dataset.saleae[ch] = result
             else:
                 print(f"Warning: No column found matching pattern '{pattern}'")
 
@@ -66,16 +78,82 @@ class ExperimentProcessor:
                 self.config.nominal_period_us
             )
 
-    def _extract_analysis_cyclictest(self):
-        cyclictest_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.json")
-        try:
-            with open(cyclictest_path, 'r') as file:
-                data = json.load(file)
-        except FileNotFoundError:
-            print(f"Error: The file '{cyclictest_path}' was not found.")
-            return None
+    def _extract_analysis_sync(self):        
+        # 1. Parse pid_chrt.log
+        pid_chrt_path = os.path.join(self.config.input_dir, self.config.load_type, "pid_chrt.log")
+        pid_policies = proc_linux.parse_pid_chrt(pid_chrt_path)
         
-        return proc_linux.cyclictest(data)
+        # 2. Extract software start time (CLOCK_MONOTONIC)
+        led_edges_path = os.path.join(self.config.input_dir, self.config.load_type, 'led_toggle_edges.csv')
+        t_led_toggle_linux = proc_linux.parse_led_toggle_edges(led_edges_path)
+        
+        # 3. Extract hardware start time (Saleae)
+        t_led_toggle_saleae = 0.0
+        if 0 in self.dataset.saleae:
+            ref_time = self.dataset.saleae[0].reference_time
+            if self.dataset.saleae[0].reference_time:
+                # Localize the raw pandas timestamp to UTC, then shift it to EET
+                eet_time = pd.Timestamp(ref_time).tz_localize('UTC').tz_convert('EET')
+                
+                # Strip the timezone info so .timestamp() calculates using the EET hours
+                t_led_toggle_saleae = eet_time.timestamp()
+            else:
+                t_led_toggle_saleae = 0.0
+            
+        # 4. Extract wall clock time from test_exec.log using new SYNC_WALL and SYNC_MONO tags
+        t_wall = 0.0
+        sync_wall = 0.0
+        sync_mono = 0.0
+        log_file_path = os.path.join(self.config.input_dir, self.config.load_type, 'test_exec.log')
+        try:
+            with open(log_file_path, 'r') as f:
+                for line in f:
+                    if 'SYNC_WALL:' in line:
+                        match = re.search(r'\d{4}-\d{2}-\d{2}-\d{2}:\d{2}:\d{2}\.\d{6}', line)
+                        if match:
+                            dt = datetime.strptime(match.group(0), "%Y-%m-%d-%H:%M:%S.%f")
+                            sync_wall = dt.timestamp()
+                    elif 'SYNC_MONO:' in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            sync_mono = float(parts[1])
+        except Exception:
+            pass
+            
+        # Calculate the perfect T_0_WALL by translating the hardware's T_0_MONO using the sync offset
+        if sync_wall > 0.0 and sync_mono > 0.0 and t_led_toggle_linux > 0.0:
+            mono_offset = t_led_toggle_linux - sync_mono
+            if mono_offset > 0:
+                # led-toggle start mono_offset later, thus, testing environment is ready and registers all effects on pin toggle
+                t_wall = sync_wall + mono_offset
+                print(f"Synchronization Achieved. Offset calculated: {mono_offset:.4f}s")
+            else:
+                print(f"Warning! Test environment started later than led-toggle. A part of {mono_offset} is not meassuring pin behaviour.")
+                t_wall = sync_wall + mono_offset
+        else:
+            print(f"Warning! Timestamp of the measurements is not synchronized.")
+            
+        self.dataset.sync_metadata = SyncMetadata(
+            t_0_wall=t_wall,
+            t_0_hw=t_led_toggle_saleae,
+            t_0_mono=t_led_toggle_linux,
+            pid_policies=pid_policies
+        )
+        
+        # Print validation warning if any monitoring tool is NOT in SCHED_OTHER
+        for pid, policy in pid_policies.items():
+            if policy != 'SCHED_OTHER':
+                print(f"WARNING: Process {pid} has policy {policy}. It should be SCHED_OTHER to avoid interfering with PREEMPT_RT tasks.")
+
+    def _extract_analysis_cyclictest(self):
+        cyclictest_json_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.json")
+        cyclictest_log_path = os.path.join(self.config.input_dir, self.config.load_type, "cyclictest.log")
+        try:
+            with open(cyclictest_json_path, 'r') as file:
+                data = json.load(file)
+            return proc_linux.cyclictest(data, log_file=cyclictest_log_path)
+        except Exception as e:
+            return None
 
     def _extract_analysis_interrupts(self):
         def parse_snapshot(file_path):
@@ -121,17 +199,36 @@ class ExperimentProcessor:
             print(e)
             return None
 
-    def _extract_analysis_mpstat(self):
-        mpstat_sum_itr_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_all.log")
+    def _extract_analysis_mpstat(self, t_0_wall: float = 0.0):
+        mpstat_all_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_all.log")
+        mpstat_sum_itr_path = os.path.join(self.config.input_dir, self.config.load_type, "mpstat_sum_itr.log")
+        
+        data = None
+        try:
+            with open(mpstat_all_path, 'r') as file:
+                data = json.load(file)
+        except Exception as e:
+            print(f"Error loading {mpstat_all_path}: {e}")
+            
         try:
             with open(mpstat_sum_itr_path, 'r') as file:
-                data = json.load(file)
-        except FileNotFoundError:
-            print(f"Error: The file '{mpstat_sum_itr_path}' was not found.")
-            return None
-        
-        return proc_linux.mpstat(data)
-
+                itr_data = json.load(file)
+                if data and 'sysstat' in data and 'sysstat' in itr_data:
+                    # Merge statistics
+                    stats_all = data['sysstat']['hosts'][0]['statistics']
+                    stats_itr = itr_data['sysstat']['hosts'][0]['statistics']
+                    
+                    # Assuming they have the same length and align by timestamp
+                    for i in range(min(len(stats_all), len(stats_itr))):
+                        stats_all[i].update(stats_itr[i])
+                    return proc_linux.mpstat(stats_all, t_0_wall)
+        except Exception as e:
+            pass # It might not exist, that's fine
+            
+        if data and 'sysstat' in data:
+            return proc_linux.mpstat(data['sysstat']['hosts'][0]['statistics'], t_0_wall)
+        return None
+    
     def generate_all_plots(self, show=False):
         self.plot_histograms(show)
         self.plot_phase_shift_combined(show)
@@ -139,23 +236,40 @@ class ExperimentProcessor:
         self.plot_signal_drift_combined(show)
         self.plot_interrupts_stacked_bar(show)
 
+        self.plot_vmstat_cpu(show)
+        self.plot_vmstat_system_activity(show)
+        self.plot_vmstat_io(show)
+        self.plot_mpstat_interrupts(show)
+        self.plot_pidstat_cpu(show)
+        self.plot_network_throughput(show)
+        self.plot_fio_hist(show)
+        self.plot_fio_bandwidth(show)
+        self.plot_fio_iops(show)
+
+        self.plot_jitter_correlation(show)
+        self.plot_network_correlation(show)
+        self.plot_storage_correlation(show)
+        self.plot_system_correlation(show)
+        
     def plot_histograms(self, show=False):
         for ch in self.config.channels:
             if ch in self.dataset.saleae:
                 title = f"Jitter Distribution ({self.config.test_type} under {self.config.load_type}, Channel {ch})"
-                proc_plt.plot_histogram_rise(self.dataset.saleae[ch],
-                                            proc_plt.plot_path(self.config, "histogram", f"rise_{ch}"),
-                                            title, None, show=show)
-                proc_plt.plot_histogram_fall(self.dataset.saleae[ch],
-                                            proc_plt.plot_path(self.config, "histogram", f"fall_{ch}"),
-                                            title, None, show=show)
+                # Individual histograms plot generaton of rising and falling edges are hidden
+                # A combined view is used only
+                # proc_plt.plot_histogram_rise(self.dataset.saleae[ch],
+                #                             proc_plt.plot_path(self.config, "histogram", f"rise_{ch}"),
+                #                             title, None, show=show)
+                # proc_plt.plot_histogram_fall(self.dataset.saleae[ch],
+                #                             proc_plt.plot_path(self.config, "histogram", f"fall_{ch}"),
+                #                             title, None, show=show)
                 proc_plt.plot_histogram_combined(self.dataset.saleae[ch],
                                                 proc_plt.plot_path(self.config, "histogram", f"rise_fall_{ch}"),
                                                 title, None, show=show)
             
         if self.dataset.cyclictest:
             title = f"Jitter Distribution CyclicTest ({self.config.test_type} under {self.config.load_type})"
-            proc_plt.plot_histogram_cyclic_test(self.dataset.cyclictest, 
+            proc_plt.plot_histogram_cyclictest(self.dataset.cyclictest, 
                                                 proc_plt.plot_path(self.config, "histogram", "cyclic_test"),
                                                 title, None, show=show)
 
@@ -195,17 +309,17 @@ class ExperimentProcessor:
     def plot_interrupts_stacked_bar(self, show=False):
         if not self.dataset.proc_interrupts:
             return
-            
+        
         active_interrupts = [
-            item for item in self.dataset.proc_interrupts
-            if item.get('delta_total', 0) > 0
+            item for item in self.dataset.proc_interrupts.records
+            if getattr(item, 'delta_total', 0) > 0
         ]
-
+        
         if active_interrupts:
-            num_cpus = len(active_interrupts[0]['delta_cpu'])
+            num_cpus = len(active_interrupts[0].delta_cpu)
             cpu_indices = [f"CPU{i}" for i in range(num_cpus)]
-
-            plot_dict = {f"{item['irq']} ({item['description']})": item['delta_cpu'] for item in active_interrupts}
+            plot_dict = {f"{item.irq} ({item.description})": item.delta_cpu for item in active_interrupts}
+            
             df_matrix = pd.DataFrame(plot_dict, index=cpu_indices)
 
             title = f"Interrupt Load Distribution per Processor Core ({self.config.load_type})"
@@ -213,16 +327,105 @@ class ExperimentProcessor:
                                                   proc_plt.plot_path(self.config, "bar", "proc_interrupts"),
                                                   title, None, show=show)
 
+    def plot_vmstat_cpu(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_cpu', '')
+        proc_plt.plot_vmstat_cpu(self.dataset.vmstat, out, title=f'CPU Breakdown Over Time ({self.config.load_type})', show=show)
+
+    def plot_vmstat_system_activity(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_activity', '')
+        proc_plt.plot_vmstat_system_activity(self.dataset.vmstat, out, title=f'System Activity Over Time ({self.config.load_type})', show=show)
+
+    def plot_vmstat_io(self, show=False):
+        if not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'vmstat_io', '')
+        proc_plt.plot_vmstat_io(self.dataset.vmstat, out, title=f'Disk I/O Activity Over Time ({self.config.load_type})', show=show)
+
+    def plot_mpstat_interrupts(self, show=False):
+        if not self.dataset.mpstat:
+            return
+        out = proc_plt.plot_path(self.config, 'mpstat_interrupts', '')
+        proc_plt.plot_mpstat_interrupts(self.dataset.mpstat, out, title=f'Selected System Interrupts ({self.config.load_type})', show=show)
+
+    def plot_pidstat_cpu(self, show=False):
+        if not self.dataset.pidstat:
+            return
+        out = proc_plt.plot_path(self.config, 'pidstat_cpu', '')
+        proc_plt.plot_pid_cpu(self.dataset.pidstat, out, title=f'Process CPU Usage Over Time ({self.config.load_type})', show=show)
+
+        out_cs = proc_plt.plot_path(self.config, 'pidstat_cswch', '')
+        proc_plt.plot_pid_cswch(self.dataset.pidstat, out_cs, title=f'Process Context Switches ({self.config.load_type})', show=show)
+
+    def plot_network_throughput(self, show=False):
+        if not self.dataset.iperf3:
+            return
+        out = proc_plt.plot_path(self.config, 'iperf3', '')
+        proc_plt.plot_network_throughput(self.dataset.iperf3, out, title=f'Network Throughput Over Time ({self.config.load_type})', show=show)
+
+    def plot_fio_hist(self, show=False):
+        if not self.dataset.fio:
+            return
+            
+        has_read = self.dataset.fio.read_metrics.total_ios > 0
+        has_write = self.dataset.fio.write_metrics.total_ios > 0
+        
+        if not has_read and not has_write:
+            return
+            
+        out = proc_plt.plot_path(self.config, 'fio_latency', '')
+        proc_plt.plot_fio_hist(self.dataset.fio, out, title=f'FIO Latency Distribution ({self.config.load_type})', show=show)
+        
+    def plot_fio_bandwidth(self, show=False, y_lim=None):
+        if not self.dataset.fio:
+            return
+        if len(self.dataset.fio.bw_kbps_read) == 0 and len(self.dataset.fio.bw_kbps_write) == 0:
+            return
+        out = proc_plt.plot_path(self.config, 'fio_bandwidth', '')
+        proc_plt.plot_fio_bandwidth(self.dataset.fio, out, title=f'FIO USB Bandwidth ({self.config.load_type})', show=show, y_lim=y_lim)
+
+    def plot_fio_iops(self, show=False, y_lim=None):
+        if not self.dataset.fio:
+            return
+        if len(self.dataset.fio.iops_count_read) == 0 and len(self.dataset.fio.iops_count_write) == 0:
+            return
+        out = proc_plt.plot_path(self.config, 'fio_iops', '')
+        proc_plt.plot_fio_iops(self.dataset.fio, out, title=f'FIO USB IOPS ({self.config.load_type})', show=show, y_lim=y_lim)
+    def plot_jitter_correlation(self, show=False):
+        if not self.dataset.saleae_common and not self.dataset.cyclictest and not self.dataset.iperf3:
+            return
+        out = proc_plt.plot_path(self.config, 'correlation_jitter', '')
+        proc_plt.plot_jitter_correlation(self.dataset, out, title=f'Full Stack Jitter Correlation ({self.config.load_type})', show=show)
+
+    def plot_network_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.iperf3:
+            return
+        out = proc_plt.plot_path(self.config, 'correlation_network', '')
+        proc_plt.plot_network_correlation(self.dataset, out, title=f'Network Determinism Correlation ({self.config.load_type})', show=show)
+
+    def plot_storage_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.fio:
+            return
+        out = proc_plt.plot_path(self.config, 'correlation_storage', '')
+        proc_plt.plot_storage_correlation(self.dataset, out, title=f'Storage Determinism Correlation ({self.config.load_type})', show=show)
+
+    def plot_system_correlation(self, show=False):
+        if not self.dataset.saleae_common or not self.dataset.vmstat:
+            return
+        out = proc_plt.plot_path(self.config, 'correlation_system', '')
+        proc_plt.plot_system_correlation(self.dataset, out, title=f'System Overhead Correlation ({self.config.load_type})', show=show)
+
 class ExperimentPlotter:
     @staticmethod
-    def plot_duty_cycle_combined(obj1: ExperimentProcessor, obj2: ExperimentProcessor, channel: int, show=False, y_lim=None):
-        if channel in obj1.dataset.saleae and channel in obj2.dataset.saleae:
+    def plot_duty_cycle_combined(datasets: list, channel: int, show=False, y_lim=None):
+        valid_datasets = [ds for ds in datasets if channel in ds.dataset.saleae]
+        if len(valid_datasets) > 1:
             title = f"Duty Cycle comparison of channel {channel}"
-            label = [
-                f"{obj1.config.load_type}",
-                f"{obj2.config.load_type}"
-            ]
-            proc_plt.plot_duty_cycle_combined(obj1.dataset.saleae[channel],
-                                              obj2.dataset.saleae[channel], 
-                                              proc_plt.plot_path(obj1.config, "duty_cycle", f"{obj2.config.load_type}_{channel}",combined=True),
-                                              title, label, show=show, y_lim=y_lim)
+            labels = [ds.config.load_type for ds in valid_datasets]
+            datasets_data = [ds.dataset.saleae[channel] for ds in valid_datasets]
+            
+            output_file = proc_plt.plot_path(valid_datasets[0].config, "duty_cycle", f"combined_{channel}", combined=True)
+            proc_plt.plot_duty_cycle_combined(datasets_data, output_file, title, labels=labels, show=show, y_lim=y_lim)
