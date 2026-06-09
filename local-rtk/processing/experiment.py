@@ -63,7 +63,11 @@ class ExperimentProcessor:
 
             if matched_idx is not None:
                 print(f"Successfully matched graph channel {ch} to column '{matched_col}'")
-                self.dataset.saleae[ch] = proc_sl.timing_analysis(self.config, df, columns[0], matched_col)
+                result = proc_sl.timing_analysis(self.config, df, columns[0], matched_col)
+                if isinstance(result, dict) and 'error' in result:
+                    print(f"Error processing channel {ch}: {result['error']}")
+                else:
+                    self.dataset.saleae[ch] = result
             else:
                 print(f"Warning: No column found matching pattern '{pattern}'")
 
