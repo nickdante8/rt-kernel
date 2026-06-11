@@ -43,6 +43,8 @@ sudo apt-get update && sudo apt-get install -y \
 1. **Shallow Clone**: Clones the official Raspberry Pi Linux repository targeting the `rpi-6.18.y` branch with `--depth 1` to optimize disk usage and download speed.
 2. **Commit Verification**: Checks out the specific commit hash defined in `config.env` (`25e0b1c206e3def1bd3bf9dcba980c5138c637a9`) to guarantee exact matching with the target Real-Time patch.
 3. **Applying PREEMPT_RT Patch**: If `DOWNLOAD_RT_PATCH=true`, the script downloads the corresponding `patch-6.18.13-rt4.patch.xz` from the kernel archives, verifies it matches the checked-out source tree version, and applies/commits it cleanly to the git history.
+   > [!NOTE]
+   > For kernel versions where an official downstream RT patch is not provided by the Raspberry Pi foundation, you must acquire the patch from [kernel.org](https://mirrors.edge.kernel.org/pub/linux/kernel/projects/rt). When applying a pure upstream patch, be aware that you may lose some Raspberry Pi foundation downstream driver optimizations. More complex configuration handling may be required in this case.
 
 ---
 

@@ -77,7 +77,21 @@ The testing suite automatically triggers stress scenarios, measures hardware-lev
 
 ### Host-Target Time Synchronization & Alignment
 Because physical signal measurement (Logic Analyzer via `local-rtk`) and software metrics generation (`test_exec.sh` via `remote-rtk`) run on completely separate hardware, aligning their timelines is paramount. 
-Before test execution, the local host pushes its exact local timestamp and timezone to the remote Raspberry Pi via `timedatectl` to force millisecond-level clock synchronization. To prevent permission errors during non-interactive scripts, `run_test.sh` securely pipes the target's `.sshpass` password directly into `sudo -S` when executing the synchronization routine. During the remote execution, the script logs `SYNC_WALL` (wall clock time) and `SYNC_MONO` (`/proc/uptime`) markers into `test_exec.log`. This ensures that all remotely captured datasets (cyclictest histograms, fio IOPS/bandwidth) perfectly correlate with the external Saleae physical measurements on a unified timeline. Additionally, the active kernel version (`uname -a`) and boot parameters (`/boot/firmware/config.txt`) are recorded to definitively link the resulting datasets to their specific real-time or baseline kernel configuration.
+Before test execution, the local host pushes its exact local timestamp and timezone to the remote Raspberry Pi via `timedatectl` to force millisecond-level clock synchronization. To prevent permission errors during non-interactive scripts, `run_test.sh` securely pipes the target's `.sshpass` password directly into `sudo -S` when executing the synchronization routine. 
+
+#### Orchestration Sequence and Timing
+The entire testing orchestration is strictly timed to ensure that background stressors (iperf3, fio, etc.) reach full load before the real-time `led-toggle` measurements begin. The execution sequence uses defined margin times (`MT`) to stagger initialization:
+1. `remote-rtk/test-exec` begins execution and initiates background stressors.
+2. After a `MT` delay, `led-toggle` begins oscillating.
+3. The local logic analyzer measurement is synchronized to capture the exact timeframe (`L1` and `L2`) when `led-toggle` is actively toggling under full load.
+*(Refer to the detailed Sequence and Timing Gantt charts in the main `README.md` for visual representation).*
+
+#### Multi-Domain File Synchronization
+To adjust the independent X-axes of all measurements to a unified timeframe (`L1` to `L2`), the following data files are generated and parsed:
+* `test-exec.log`: Records `SYNC_WALL` (wall clock time in `%Y-%m-%d-%H:%M:%S.%N`) and `SYNC_MONO` (`CLOCK_MONOTONIC` value from `/proc/uptime`).
+* `led_toggle_edges.csv`: Records the `CLOCK_MONOTONIC` timestamps for the start (`L1`) and end (`L2`) periods of the toggle cycle directly from the `led-toggle.service`.
+* `digital.csv`: Contains the physical Saleae logic analyzer edges in ISO8601 timestamp format.
+Using these markers, the Python visualization library mathematically aligns the physical Saleae edges perfectly with the remotely captured datasets (cyclictest histograms, fio IOPS/bandwidth). Additionally, the active kernel version (`uname -a`) and boot parameters (`/boot/firmware/config.txt`) are recorded to definitively link the resulting datasets to their specific real-time or baseline kernel configuration.
 
 ### Test Instrumentation Tools
 We deploy standard real-time profiling utilities on the target system:

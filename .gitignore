@@ -42,3 +42,5 @@ __pypackages__/
 
 # Environments
 .venv
+.hermes
+.antigravitycli
