@@ -64,8 +64,12 @@ def _parse_cyclictest_thread(thread_id, thread_data):
     else:
         std_dev = 0.0
 
+    cpu_val = thread_data.get('cpu', -1)
+    if cpu_val == -1:
+        cpu_val = int(thread_id)
+
     return CyclictestThreadMetrics(
-        cpu=thread_data.get('cpu', int(thread_id)),
+        cpu=cpu_val,
         histogram=hist_data,
         latencies=latencies,
         frequencies=frequencies,

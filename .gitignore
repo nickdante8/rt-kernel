@@ -10,10 +10,13 @@ dist
 local-rtk/saleae.log
 service-env-var
 .setup_file_current
-*.png
+.sshpass
+.env*
 patch*
-*.html
 config*
+*.png
+*.html
+
 
 # Bash specific
 

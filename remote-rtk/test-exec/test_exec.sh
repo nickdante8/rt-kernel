@@ -99,7 +99,7 @@ timing_measurement() {
         cat /proc/interrupts > "${OUTPUT_DIR}/${LOAD_TYPE}/interrupts_start.txt"
 
         # Start cyclictest (Internal Latency)
-        sudo cyclictest -m -s -t4 -p99 -i${cyclictest_interval} -h${cyclictest_hist} -D ${CAPTURE_DURATION_S_EXTENDED} \
+        sudo cyclictest -a -m -s -t4 -p99 -i${cyclictest_interval} -h${cyclictest_hist} -D ${CAPTURE_DURATION_S_EXTENDED} \
             --json="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.json" --histfile="${OUTPUT_DIR}/${LOAD_TYPE}/cyclictest.log" &
         CYCLIC_PID=$!
 
@@ -277,19 +277,35 @@ main() {
     # Actual testing
     echo "=== Executing Test: ${TEST_TYPE_FOLDER_NAME}, ${LOAD_TYPE} ==="
 
-    # Temporary
+    # Variable for wall and mono timestamps
     SYNC_WALL=$(date +'%Y-%m-%d-%H:%M:%S.%N')
     SYNC_MONO=$(awk '{print $1}' /proc/uptime)
 
+    # Extract active kernel configuration
+    ACTIVE_SYS_NAME=$(tail -n 1 /boot/firmware/config.txt)
+    ACTIVE_SYS_CMD_FILE="/boot/firmware/${ACTIVE_SYS_NAME#os_prefix=}/cmdline.txt"
+
+    if [ -f "${ACTIVE_SYS_CMD_FILE}" ]; then
+        ACTIVE_SYS_CMD_CONTENT=$(cat ${ACTIVE_SYS_CMD_FILE})
+    else
+        ACTIVE_SYS_CMD_CONTENT=$(cat /boot/firmware/cmdline.txt)
+    fi
+
+    # Log test status information
     cat <<EOF > "${OUTPUT_DIR}/${LOAD_TYPE}/test_exec.log"
+# Start test time
 SYNC_WALL: ${SYNC_WALL}
 SYNC_MONO: ${SYNC_MONO}
 
 # Save kernel version
 $(uname -a)
 
-# Boot options
+# Boot system
 $(tail -n 3 /boot/firmware/config.txt)
+
+# Kernel boot options
+${ACTIVE_SYS_CMD_CONTENT}
+
 EOF
 
     # Start testing. Initialize all tooling
@@ -301,8 +317,9 @@ EOF
     # Stop testing. Close and clean
     test_stop "${LOAD_TYPE}"
 
-    # Temporary
+    # Log test status information
     cat <<EOF >> "${OUTPUT_DIR}/${LOAD_TYPE}/test_exec.log"
+# End test time
 SYNC_WALL_END: ${SYNC_WALL}
 SYNC_MONO_END: ${SYNC_MONO}
 EOF

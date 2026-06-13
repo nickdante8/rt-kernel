@@ -119,6 +119,52 @@ config_kernel() {
     # Enable High Resolution Timers (critical for precision in both, but essential for RT)
     "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable HIGH_RES_TIMERS
 
+    # Real-time and low-latency core isolation options
+    echo "-> Configuring low-latency interrupt reduction options..."
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable NO_HZ_FULL
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable RCU_NOCB_CPU
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable IRQ_FORCED_THREADING
+
+    # Specific User-Requested Protocol Disables
+    echo "-> Disabling CAN, NFC, SMB_SERVER, W1, IIO, Camera, and Touchscreen..."
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable CAN
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable NFC
+    
+    # Filesystems
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable SMB_SERVER
+    
+    # Industrial I/O & 1-Wire
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable W1
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable IIO
+
+    # Media/Camera & Touchscreen
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable MEDIA_SUPPORT
+    "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --disable INPUT_TOUCHSCREEN
+
+
+    # Ensure compatibility with different Raspberry Pi versions (RPi 3B+, RPi 4, RPi 5)
+    # Only necessary if using the generic mainline 'defconfig'
+    if [ "${DEFCONFIG}" = "defconfig" ]; then
+        echo "-> Verifying multi-version Raspberry Pi hardware compatibility (Generic defconfig detected)..."
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable ARCH_BCM
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable ARCH_BCM2835
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable ARCH_BRCMSTB
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable BCMGENET
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_XHCI_HCD
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PINCTRL_RP1
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable PINCTRL_BCM2712
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable COMMON_CLK_RP1
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --module MBOX_RP1
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable BCM2712_IOMMU
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_DWCOTG
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_LAN78XX
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable USB_NET_SMSC95XX
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable MMC_BCM2835
+        "${CONFIG_CMD}" --file "${BUILD_DIR_PATH}/.config" --enable MMC_SDHCI_IPROC
+    else
+        echo "-> Skipping manual hardware compatibility enables (Relying on specific defconfig)..."
+    fi
+
     # Harden the config for the specific target platform
     config_platform_specific
 

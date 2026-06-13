@@ -88,10 +88,10 @@ The entire testing orchestration is strictly timed to ensure that background str
 
 #### Multi-Domain File Synchronization
 To adjust the independent X-axes of all measurements to a unified timeframe (`L1` to `L2`), the following data files are generated and parsed:
-* `test-exec.log`: Records `SYNC_WALL` (wall clock time in `%Y-%m-%d-%H:%M:%S.%N`) and `SYNC_MONO` (`CLOCK_MONOTONIC` value from `/proc/uptime`).
+* `test-exec.log`: Records `SYNC_WALL` (wall clock time in `%Y-%m-%d-%H:%M:%S.%N`), `SYNC_MONO` (`CLOCK_MONOTONIC` value from `/proc/uptime`), and the active kernel boot parameters (extracted dynamically from `/boot/firmware/<os_prefix>/cmdline.txt` and `config.txt`).
 * `led_toggle_edges.csv`: Records the `CLOCK_MONOTONIC` timestamps for the start (`L1`) and end (`L2`) periods of the toggle cycle directly from the `led-toggle.service`.
 * `digital.csv`: Contains the physical Saleae logic analyzer edges in ISO8601 timestamp format.
-Using these markers, the Python visualization library mathematically aligns the physical Saleae edges perfectly with the remotely captured datasets (cyclictest histograms, fio IOPS/bandwidth). Additionally, the active kernel version (`uname -a`) and boot parameters (`/boot/firmware/config.txt`) are recorded to definitively link the resulting datasets to their specific real-time or baseline kernel configuration.
+Using these markers, the Python visualization library mathematically aligns the physical Saleae edges perfectly with the remotely captured datasets (cyclictest histograms, fio IOPS/bandwidth). Additionally, the active kernel version (`uname -a`) and the precise `cmdline.txt` boot parameters are recorded to definitively link the resulting datasets to their specific real-time or baseline kernel configuration.
 
 ### Test Instrumentation Tools
 We deploy standard real-time profiling utilities on the target system:
@@ -106,7 +106,7 @@ Crucially, the `test-exec.service` which manages the execution of stress tools i
 ### Upgraded Multi-Thread Jitter Profiling (`-t4`)
 Originally, the benchmark execution script (`test_exec.sh`) executed a single-threaded cyclictest instance pinned to a single core (`-a 0 -t1`). This configuration hid the latency distribution across the other CPU cores, making it impossible to evaluate core isolation effects.
 
-The instrumentation suite was upgraded to **4-thread CPU-wide profiling (`-t4`)** to monitor scheduling jitter across all 4 cores simultaneously. In addition, the histogram depth was increased to **`-h1000`** to capture scheduling outliers and Worst-Case Execution Time (WCET) delays up to 1000 microseconds (1ms). Finally, to prevent test phase-locking (where `cyclictest` and `led-toggle` inadvertently fall into a synchronized cadence), the benchmark calculates the measurement interval dynamically by subtracting a 3% offset from the nominal toggle semi-period.
+The instrumentation suite was upgraded to **4-thread CPU-wide profiling (`-a -t4`)** to automatically set affinity and monitor scheduling jitter across all 4 cores simultaneously. In addition, the histogram depth was increased to **`-h1000`** to capture scheduling outliers and Worst-Case Execution Time (WCET) delays up to 1000 microseconds (1ms). Finally, to prevent test phase-locking (where `cyclictest` and `led-toggle` inadvertently fall into a synchronized cadence), the benchmark calculates the measurement interval dynamically by subtracting a 3% offset from the nominal toggle semi-period.
 
 ### Synthesized Load Profiles
 The test framework supports six distinct load scenarios to isolate scheduling and hardware bottlenecks:
@@ -122,7 +122,7 @@ The test framework supports six distinct load scenarios to isolate scheduling an
 ## 4. Multi-Core Jitter Visualization
 
 ### Parsing & Aligning Multi-Domain Data Streams
-The Python processing library (`local-rtk/processing/linux.py` and `local-rtk/processing/models.py`) is responsible for extracting individual telemetry datasets (Saleae edge events, `cyclictest` JSON threads, `fio` JSON+, and `pidstat` outputs). Crucially, the parser utilizes the `SYNC_WALL` baseline timestamps extracted from `test_exec.log` to align the independent axes (local host time vs. remote monotonic uptime) into a single, synchronized timeline.
+The Python processing library (`local-rtk/processing/linux.py` and `local-rtk/processing/models.py`) is responsible for extracting individual telemetry datasets (Saleae edge events, `cyclictest` JSON threads, `fio` JSON+, and `pidstat` outputs). The parser includes robust fallback handling for missing `cpu` thread IDs in older `cyclictest` JSON outputs. Crucially, the parser utilizes the `SYNC_WALL` baseline timestamps extracted from `test_exec.log` to align the independent axes (local host time vs. remote monotonic uptime) into a single, synchronized timeline.
 
 ### Unified Timeline & Combined Plots
 The test framework now supports generating comprehensive **Combined Plots** that map hardware events directly against software metrics. This allows us to visually observe how a spike in disk writes (from `fio`) or network interrupts directly correlates with a jitter outlier in the `led-toggle` real-time cycle at exactly the same microsecond. To maximize readability and prevent overlapping plotted data, statistical summaries for the combined correlation plots (System, Network, and Storage) are dynamically embedded at the bottom of the graphs. 
