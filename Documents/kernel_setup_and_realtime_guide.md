@@ -1,6 +1,6 @@
 # Linux Kernel Customization & Real-Time Setup Guide for Raspberry Pi 3B+
 
-This guide provides a comprehensive reference for configuring, compiling, installing, and optimizing custom Baseline and Real-Time (PREEMPT_RT) Linux kernels (v6.18.13) for the Raspberry Pi 3 Model B+. It also details the system-level optimizations (core isolation, IRQ pinning, ZRAM management) and hardware interfacing safety standards (`led-toggle` service).
+This guide provides a comprehensive reference for configuring, compiling, installing, and optimizing custom Baseline and Real-Time (PREEMPT_RT) Linux kernels (v6.18.x) for the Raspberry Pi 3 Model B+. It also details the system-level optimizations (core isolation, IRQ pinning, ZRAM management) and hardware interfacing safety standards (`led-toggle` service).
 
 ---
 
@@ -58,6 +58,7 @@ Initially, the configuration framework attempted aggressive, platform-specific m
 To guarantee absolute build stability, the manual platform stripping functions were removed from `configure.sh`. Instead, the build system relies on official, battle-tested configuration templates provided in the Raspberry Pi kernel source tree:
 * **Baseline Defconfig**: `bcm2711_defconfig` (the official downstream unified 64-bit config supporting Pi 3B+, Pi 4, and other Broadcom architectures).
 * **Real-Time Defconfig**: `bcm2711_rt_defconfig` (the official downstream config containing the necessary real-time and preemption structure changes).
+* **Generic Mainline Fallback**: If using a generic mainline `defconfig` (e.g. for pure upstream builds or older `6.18.13` branches), `configure.sh` will automatically enforce Raspberry Pi multi-version hardware compatibility by manually injecting `ARCH_BCM`, `ARCH_BCM2835`, `BCMGENET`, `USB_LAN78XX`, and other essential drivers into the `.config` before compilation.
 
 Using these base configurations ensures that all clock drivers, architecture dependencies, and essential platform drivers are correctly linked and compile out-of-the-box.
 
@@ -69,11 +70,12 @@ Depending on the `ENABLE_RT` flag in `config.env`, the script configures the sch
 | :--- | :--- | :--- |
 | **Preemption Model** | `CONFIG_PREEMPT=y`<br>*(Standard preemption for desktop workloads)* | `CONFIG_PREEMPT_RT=y`<br>*(Forces all locks/handlers to be preemptible)* |
 | **Timer Frequency** | `CONFIG_HZ_250=y` / `CONFIG_HZ=250`<br>*(250 Hz tick rate for low overhead)* | `CONFIG_HZ_1000=y` / `CONFIG_HZ=1000`<br>*(1000 Hz tick rate for 1ms precision)* |
-| **RCU Offloading** | `CONFIG_RCU_NOCB_CPU` is disabled. | `CONFIG_RCU_NOCB_CPU=y`<br>*(Offloads RCU callbacks from isolated CPU cores)* |
 | **Local Version Suffix**| `-BASELINE-CUSTOM` | `-RT-CUSTOM` |
 
-### Subsystem Stripping (WiFi, Bluetooth, Video/Sound)
-To optimize real-time latency (as drivers for wireless devices and GPUs often trigger high-priority system interrupts or long-running critical sections), the configurations can be stripped:
+### Subsystem Stripping and Interrupt Reduction
+To optimize real-time latency (as drivers for peripheral devices often trigger high-priority system interrupts or long-running critical sections), `configure.sh` automatically strips non-essential subsystems and applies low-latency features:
+* **Core Interrupt Reduction**: Globally enables `NO_HZ_FULL`, `RCU_NOCB_CPU`, and `IRQ_FORCED_THREADING` to minimize OS noise and offload kernel interrupts.
+* **Peripheral Stripping**: Automatically disables hardware protocols unnecessary for standard operation (CAN, NFC, SMB_SERVER, W1, IIO, MEDIA_SUPPORT, INPUT_TOUCHSCREEN) to further reduce driver initialization overhead.
 * **Wireless Support (`STRIP_WIFI=true`)**: Disables `CONFIG_CFG80211` and `CONFIG_MAC80211`, removing the Wi-Fi stack and drivers.
 * **Bluetooth Support (`STRIP_BLUETOOTH=true`)**: Disables `CONFIG_BT`, removing the Bluetooth subsystem.
 * **Sound/Video Support (`STRIP_SOUND_VIDEO=true`)**: Disables `CONFIG_SOUND` (soundcard architecture) and `CONFIG_DRM` (Direct Rendering Manager / GPU drivers).
@@ -85,19 +87,19 @@ To optimize real-time latency (as drivers for wireless devices and GPUs often tr
 ## 3. Dual-Boot Isolation & Deployment
 
 ### Staging & Module Cleanup
-Running `./make.sh` compiles the kernel, device trees, and modular drivers, placing them in `dist/linux-6.18.13-[baseline|rt]/`:
-* **Dangling Symlinks**: The build system automatically deletes the `build` and `source` symlinks created inside `lib/modules/6.18.13-*/` during modular driver installation.
+Running `./make.sh` compiles the kernel, device trees, and modular drivers, placing them in `dist/linux-6.18.x-[baseline|rt]/`:
+* **Dangling Symlinks**: The build system automatically deletes the `build` and `source` symlinks created inside `lib/modules/6.18.x-*/` during modular driver installation.
   > [!WARNING]
   > If these symlinks are not removed, `scp` will follow them and attempt to transfer the entire multi-gigabyte kernel source code directory from the host to the Pi over the network, causing disk exhaustion and deployment failure.
 
 ### Isolated Boot Prefixes (`os_prefix`)
 Instead of overwriting the default OS kernel (`/boot/firmware/kernel8.img`), which risks bricking the Pi if a configuration fails to boot, the custom kernels are installed in isolated directories inside `/boot/firmware/`:
-* Baseline path: `/boot/firmware/6.18.13-baseline/`
-* RT path: `/boot/firmware/6.18.13-rt/`
+* Baseline path: `/boot/firmware/6.18.x-baseline/`
+* RT path: `/boot/firmware/6.18.x-rt/`
 
 The Raspberry Pi bootloader is redirected to these folders dynamically via the `os_prefix` configuration key in `/boot/firmware/config.txt`. For example, setting:
 ```config
-os_prefix=6.18.13-rt/
+os_prefix=6.18.x-rt/
 ```
 tells the firmware to load the kernel image (`kernel8.img`), standard device trees, and overlays from that folder instead of the root directory.
 
@@ -111,8 +113,8 @@ The `install.sh` script exposes several subcommands to manage remote kernel depl
 ### Kernel Switching Utility
 The script installs a helper script on the Pi at `/usr/local/bin/switch-kernel.sh`. It modifies `/boot/firmware/config.txt` to safely toggle between setups:
 * `sudo switch-kernel default`: Restores factory default Raspberry Pi OS boot.
-* `sudo switch-kernel 6.18.13-baseline`: Loads the custom baseline kernel.
-* `sudo switch-kernel 6.18.13-rt`: Loads the custom PREEMPT_RT kernel.
+* `sudo switch-kernel 6.18.x-baseline`: Loads the custom baseline kernel.
+* `sudo switch-kernel 6.18.x-rt`: Loads the custom PREEMPT_RT kernel.
 
 ---
 

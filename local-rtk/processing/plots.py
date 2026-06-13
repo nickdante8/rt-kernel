@@ -1139,7 +1139,7 @@ def plot_storage_correlation(dataset: ExperimentDataset, output_file, title=None
             for irq_name, values in core_all.individual_interrupts.items():
                 if '51' in irq_name or 'mmc' in irq_name.lower():
                     avg_val = np.mean(values)
-                    ax2.plot(core_all.timestamps, values, color='red', marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: f{avg_val:.1f}/s)')
+                    ax2.plot(core_all.timestamps, values, color='red', marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: {avg_val:.1f}/s)')
             ax2.set_ylabel('Storage IRQs / sec', color='red', fontsize=12)
             
         ax.set_ylabel('HW Jitter (us)', color='purple', fontsize=12)
