@@ -72,7 +72,7 @@ typedef void (*fptr_sleep)(uint32_t, timespec_t *);
 /* Global flag to control the loop */
 volatile sig_atomic_t keepRunning = 1;
 
-/* Register signal handler function whe SIGINT, SIGTERM is received */
+/* Register signal handler function when SIGINT, SIGTERM is received */
 void signalHandler(int signum) {
     /* Using write is "async-signal-safe" */
     const char msg[] = "\n--- Signal Handler Caught SIGTERM ---\n";

@@ -1,0 +1,50 @@
+---
+config:
+    theme: 'default'
+---
+sequenceDiagram
+    participant OS as Operating System
+    participant Main as main()
+    participant Iso as isolation_priority_cfg()
+    participant Arg as arg_parse()
+    participant GPIOD as libgpiod (GPIO 17)
+    participant PWM as sysfs (GPIO 18 PWM)
+    participant Sleep as time_sleep_ptr()
+    participant Log as finalize_and_save_logs()
+
+    OS->>Main: Start Process
+    
+    Main->>Iso: Configure RT Priorities
+    Note over Iso: mlockall, sched_setaffinity, sched_setscheduler
+    Iso-->>Main: Success
+    
+    Main->>Arg: Parse arguments
+    Arg-->>Main: Success (duration, period)
+    
+    Main->>GPIOD: Open /dev/gpiochip0, configure & request line
+    GPIOD-->>Main: Success
+    
+    Main->>PWM: pwm_init()
+    Note over PWM: sysfs export, set duty=0, period, target duty, enable
+    PWM-->>Main: Success
+    
+    loop while keepRunning && current_time < end_time
+        Main->>GPIOD: set_value(ACTIVE)
+        Main->>Sleep: clock_nanosleep / usleep
+        Sleep-->>Main: wakeup
+        Main->>Main: Calculate Jitter & save_edge(1)
+
+        Note over OS,Main: SIGTERM / SIGINT triggers handler<br/>Sets keepRunning = 0
+        
+        Main->>GPIOD: set_value(INACTIVE)
+        Main->>Sleep: clock_nanosleep / usleep
+        Sleep-->>Main: wakeup
+        Main->>Main: Calculate Jitter & save_edge(0)
+    end
+    
+    
+    Main->>GPIOD: reconfigure line to INPUT (High-Z)
+    Main->>PWM: pwm_disable() (sysfs)
+    Main->>Log: write edges to CSV
+    Main->>GPIOD: free resources
+    Main-->>OS: exit(EXIT_SUCCESS)

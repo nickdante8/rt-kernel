@@ -116,6 +116,8 @@ The script installs a helper script on the Pi at `/usr/local/bin/switch-kernel.s
 * `sudo switch-kernel 6.18.x-baseline`: Loads the custom baseline kernel.
 * `sudo switch-kernel 6.18.x-rt`: Loads the custom PREEMPT_RT kernel.
 
+*(See the sequence diagram in [kernel-switch-sequence.mmd](./kernel-switch-sequence.mmd) for the logical flow of this utility).*
+
 ---
 
 ## 4. Real-Time Command Line Optimization (`cmdline.txt`)
@@ -215,6 +217,8 @@ The activation of this helper service is **completely decoupled from the kernel 
 * The `switch-kernel.sh` script scans the target kernel's `cmdline.txt` for `isolcpus` or `irqaffinity`.
 * If isolation flags are found (meaning `ENABLE_ISOLATION=true` was set when generating that kernel's boot parameter list), the IRQ Offloading service is automatically **enabled**.
 * If no isolation flags are present (meaning `ENABLE_ISOLATION=false` was set), the service is automatically **disabled**.
+
+*(See the sequence diagram in [pin-usb-irq-sequence.mmd](./pin-usb-irq-sequence.mmd) for details on the isolation detection and activation logic).*
 
 This decoupling allows you to test:
 1. **RT kernels with or without core isolation** (evaluating raw PREEMPT_RT capabilities versus core shielding).
