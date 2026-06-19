@@ -34,6 +34,8 @@ Direct writes to sysfs files (`/sys/class/pwm/pwmchip0/pwm0/...`) can lead to `-
 4. **Set the target duty cycle** in nanoseconds.
 5. **Enable PWM** (`enable` $\rightarrow$ `1`).
 
+*(Refer to [led-toggle-flowchart.mmd](./led-toggle-flowchart.mmd) and [led-toggle-sequence.mmd](./led-toggle-sequence.mmd) for detailed diagrams of the C daemon logic).*
+
 ### High-Impedance Safety Exit
 If a GPIO pin is configured as an output driving HIGH (3.3V) and is accidentally shorted to the metal chassis or ground, the high current draw will destroy the internal output transistors on the SoC.
 
@@ -84,7 +86,7 @@ The entire testing orchestration is strictly timed to ensure that background str
 1. `remote-rtk/test-exec` begins execution and initiates background stressors.
 2. After a `MT` delay, `led-toggle` begins oscillating.
 3. The local logic analyzer measurement is synchronized to capture the exact timeframe (`L1` and `L2`) when `led-toggle` is actively toggling under full load.
-*(Refer to the detailed Sequence and Timing Gantt charts in the main `README.md` for visual representation).*
+*(Refer to the high-level orchestration sequence and timing diagrams in the main [README.md](../README.md), as well as the deeper sub-system traces in [test-execution-sequence.mmd](./test-execution-sequence.mmd), [test-execution-loads-sequence.mmd](./test-execution-loads-sequence.mmd), and [test-execution-gantt.mmd](./test-execution-gantt.mmd)).*
 
 #### Multi-Domain File Synchronization
 To adjust the independent X-axes of all measurements to a unified timeframe (`L1` to `L2`), the following data files are generated and parsed:
@@ -129,6 +131,9 @@ The test framework now supports generating comprehensive **Combined Plots** that
 
 ### Phase Drift & Signal Plots
 The evaluation library (`local-rtk/processing/plots.py`) generates highly detailed signal behavior plots for phase shift and duty cycle drift. To provide immediate quantitative validation, comprehensive statistics boxes containing Minimum, Maximum, Average, and comparative differential metrics are systematically embedded onto every generated drift and phase plot canvas.
+
+### Results Aggregation & Summary Extraction
+To facilitate rapid comparison across different kernel configurations and phases (e.g. Baseline vs RT, Isolated vs Non-Isolated), the processing suite provides an extraction utility (`local-rtk/processing/extract_summary_tables.py`). This script bulk-processes multiple dataset directories and exports a consolidated CSV matrix (`extracted_results.csv`) containing the peak hardware jitter (Saleae) and worst-case OS scheduling delays (cyclictest) for every load profile.
 
 ### Overlaid Latency Histograms
 Using `local-rtk/processing/plots.py`, multi-threaded `cyclictest` measurements are extracted and mapped to `CyclictestThreadMetrics`. These are visualized in an **overlaid, semi-transparent bar plot**:

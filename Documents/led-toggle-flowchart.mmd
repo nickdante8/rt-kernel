@@ -1,0 +1,57 @@
+---
+config:
+    theme: 'default'
+---
+%%{init: {'flowchart': {'nodeSpacing': 50, 'rankSpacing': 20, 'padding': 0}}}%%
+flowchart TD
+    subgraph Setup ["<b>Initialization & Setup</b>"]
+        Start(["Start main"]) --> IsoCfg{"isolation_cfg() OK?"}
+        IsoCfg -- No --> ExitFail1(["Exit FAILURE"])
+        IsoCfg -- Yes --> SetupSignal["sigaction(SIGTERM/INT)"]
+        SetupSignal --> ArgParse{"arg_parse() OK?"}
+        ArgParse -- No --> ExitFail1
+        ArgParse -- Yes --> InitGpiod{"gpiod init OK?"}
+        InitGpiod -- No --> ExitFail1
+        InitGpiod -- Yes --> CalcTime["Calc times & duty cycle"]
+        CalcTime --> SetTime["time_sleep_ptr = rel/abs"]
+        SetTime --> InitPwm{"pwm_init() OK?"}
+        InitPwm -- No --> ExitFail1
+        InitPwm -- Yes --> PreLoop["clock_gettime baseline"]
+        PreLoop --> GotoLoop(("A"))
+    end
+
+    subgraph Loop ["<b>Real-Time Toggle Loop</b>"]
+        %% Asynchronous Event
+        SigCatch(["Async: SIGTERM/INT"]) --> SigWrite["write(STDOUT, msg)"]
+        SigWrite --> SigSet["keepRunning = 0"]
+        
+        FromA(("A")) --> LoopCheck{"keepRunning &&<br>current_time < end_time"}
+        
+        %% Dotted line showing the interrupt effect
+        SigSet -.->|Forces Exit| LoopCheck
+
+        LoopCheck -- Yes --> SetActive["save_edge(1)<br>gpiod_set(ACTIVE)"]
+        SetActive --> SleepActive["time_sleep_ptr()"]
+        SleepActive --> CalcJitActive["Calc Jitter & Stats"]
+        CalcJitActive --> SetInactive["save_edge(0)<br>gpiod_set(INACTIVE)"]
+        SetInactive --> SleepInactive["time_sleep_ptr()"]
+        SleepInactive --> CalcJitInactive["Calc Jitter & Stats"]
+        CalcJitInactive --> UpdateTime["current_time = get_time_s()"]
+        UpdateTime -->|Repeat| LoopCheck
+        LoopCheck -- No --> GotoB(("B"))
+    end
+
+    subgraph Shutdown ["<b>Shutdown & Cleanup</b>"]
+        FromB(("B")) --> SetHighZ["Reconfigure GPIO to High-Z"]
+        SetHighZ --> DisablePwm["pwm_disable()"]
+        DisablePwm --> FinalizeLogs["finalize_and_save_logs()"]
+        FinalizeLogs --> PrintStats{"jstats.count > 0?"}
+        PrintStats -- Yes --> LogStats["Log Stats"]
+        PrintStats -- No --> FreeRes
+        LogStats --> FreeRes["Free libgpiod & closelog"]
+        FreeRes --> ExitSuccess(["Exit SUCCESS"])
+    end
+
+    %% Invisible alignment links to force side-by-side columns
+    Start ~~~ FromA
+    FromA ~~~ FromB

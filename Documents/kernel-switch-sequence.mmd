@@ -1,0 +1,35 @@
+---
+config:
+    theme: 'default'
+---
+sequenceDiagram
+    actor User
+    participant Switch as switch-kernel.sh
+    participant Config as /boot/firmware/config.txt
+    participant Systemd as systemd
+    participant PinSh as pin-usb-irq.sh
+    participant OS as OS / Kernel
+
+    %% Configuration Phase
+    User->>Switch: sudo switch-kernel [prefix]
+    Switch->>+Config: Remove old os_prefix & kernel
+    Config-->>-Switch: return
+    
+    alt prefix == "default"
+        Switch->>+Systemd: disable pin-usb-irq.service
+        Systemd-->>-Switch: return
+    else custom prefix
+        Switch->>+Config: append os_prefix=[prefix]/
+        Config-->>-Switch: return
+        Switch->>+OS: grep isolcpus|irqaffinity in [prefix]/cmdline.txt
+        OS-->>Switch: matches found (Isolation Active)
+        
+        alt matches found
+            Switch->>+Systemd: enable pin-usb-irq.service
+            Systemd-->>-Switch: return
+        else no matches
+            Switch->>+Systemd: disable pin-usb-irq.service
+            Systemd-->>-Switch: return
+        end
+    end
+    Switch-->>User: "Reboot to apply"

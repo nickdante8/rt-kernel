@@ -70,6 +70,7 @@ Depending on the `ENABLE_RT` flag in `config.env`, the script configures the sch
 | :--- | :--- | :--- |
 | **Preemption Model** | `CONFIG_PREEMPT=y`<br>*(Standard preemption for desktop workloads)* | `CONFIG_PREEMPT_RT=y`<br>*(Forces all locks/handlers to be preemptible)* |
 | **Timer Frequency** | `CONFIG_HZ_250=y` / `CONFIG_HZ=250`<br>*(250 Hz tick rate for low overhead)* | `CONFIG_HZ_1000=y` / `CONFIG_HZ=1000`<br>*(1000 Hz tick rate for 1ms precision)* |
+| **RCU Offloading** | `CONFIG_RCU_NOCB_CPU` is disabled. | `CONFIG_RCU_NOCB_CPU=y`<br>*(Offloads RCU callbacks from isolated CPU cores)* |
 | **Local Version Suffix**| `-BASELINE-CUSTOM` | `-RT-CUSTOM` |
 
 ### Subsystem Stripping and Interrupt Reduction
@@ -115,6 +116,8 @@ The script installs a helper script on the Pi at `/usr/local/bin/switch-kernel.s
 * `sudo switch-kernel default`: Restores factory default Raspberry Pi OS boot.
 * `sudo switch-kernel 6.18.x-baseline`: Loads the custom baseline kernel.
 * `sudo switch-kernel 6.18.x-rt`: Loads the custom PREEMPT_RT kernel.
+
+*(See the sequence diagram in [kernel-switch-sequence.mmd](./kernel-switch-sequence.mmd) for the logical flow of this utility).*
 
 ---
 
@@ -215,6 +218,8 @@ The activation of this helper service is **completely decoupled from the kernel 
 * The `switch-kernel.sh` script scans the target kernel's `cmdline.txt` for `isolcpus` or `irqaffinity`.
 * If isolation flags are found (meaning `ENABLE_ISOLATION=true` was set when generating that kernel's boot parameter list), the IRQ Offloading service is automatically **enabled**.
 * If no isolation flags are present (meaning `ENABLE_ISOLATION=false` was set), the service is automatically **disabled**.
+
+*(See the sequence diagram in [pin-usb-irq-sequence.mmd](./pin-usb-irq-sequence.mmd) for details on the isolation detection and activation logic).*
 
 This decoupling allows you to test:
 1. **RT kernels with or without core isolation** (evaluating raw PREEMPT_RT capabilities versus core shielding).

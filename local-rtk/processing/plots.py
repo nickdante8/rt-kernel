@@ -1065,9 +1065,9 @@ def plot_network_correlation(dataset: ExperimentDataset, output_file, title=None
         ax2 = ax.twinx()
         if dataset.mpstat is not None and len(dataset.mpstat.cores) > 0:
             core_all = dataset.mpstat.cores['all']
-            # Plot only network IRQs if possible, else 74 (usb/net)
+            # Plot only network IRQs if possible, else 74 or 51 (usb/net)
             for irq_name, values in core_all.individual_interrupts.items():
-                if '74' in irq_name or 'eth' in irq_name.lower():
+                if ('74' in irq_name or '51' in irq_name) or 'eth' in irq_name.lower():
                     avg_val = np.mean(values)
                     ax2.plot(core_all.timestamps, values, color='red', marker='.', alpha=0.7, label=f'IRQ {irq_name} (Avg: {avg_val:.1f}/s)')
             ax2.set_ylabel('Network IRQs / sec', color='red', fontsize=12)
