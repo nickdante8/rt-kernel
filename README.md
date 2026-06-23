@@ -184,7 +184,6 @@ The goal is to follow and achive a testing scenario which will cover this timing
 ```mermaid
 ---
   config:
-    theme: 'default'
     gantt:
       sectionFontSize: 20
 ---
