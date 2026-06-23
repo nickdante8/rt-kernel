@@ -182,6 +182,12 @@ The goal is to follow and achive a testing scenario which will cover this timing
  * `L1` and `L2` - is the time interval where the led-toggle service is toggling the pins on the target
 
 ```mermaid
+---
+  config:
+    theme: 'default'
+    gantt:
+      sectionFontSize: 20
+---
 gantt
   title Measurement synchronization timings for a 10s test
   %% This is a comment
