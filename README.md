@@ -5,8 +5,9 @@ Real Time Linux kernel for Raspberry PI 3B+.
 The primary goals of this project are:
 *   Compile a custom 64-bit Linux Kernel (v6.x) with the `PREEMPT_RT` patchset for the Raspberry Pi 3B+.
 *   Isolate real-time operations to a single CPU core (the 3rd one).
-*   Reduce the maximum "Worst-Case" latency from ~200-500μs (on a standard OS) to under 50μs when under synthetic stress.
-*   Provide empirical proof of determinism using a physical logic analyzer connected to the GPIO pins.
+*   Formally measure and reduce the Worst-Case Response Latency (WCRL). Based on literature measurements, WCRL is represented as the combined execution time of the initiating and responding tasks ($WCRL = WCET_{1} + WCET_{2}$).
+*   Correlate internal OS measurements (using `cyclictest` WCET) with external hardware validation (using a Saleae logic analyzer) to prove determinism.
+*   Improve upon existing benchmark literature. While prior studies show an oscilloscope-measured WCRL of ~50μs for an idle PREEMPT_RT kernel on Raspberry Pi, our target is to achieve and prove a highly optimized jitter bound of **~25μs** at idle and **~67μs** under full synthetic stress (CPU, Network, and USB loads).
 *   Demonstrate latency reduction on the USB/Ethernet bus. High network or USB traffic can trigger a large number of Interrupt Requests (IRQs), which cause unpredictable latency spikes (jitter) in a standard kernel.
 *   Add the new kernel to the Raspberry Pi to be able to switch between the default and the real-time one.
 
@@ -60,6 +61,7 @@ The entire project is divided in 3 sections:
 All related documentation to RPI 3B+ is taken directly from the official [source](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#introduction). A set of documents can be found in [Documents](./Documents/) folder and some provided links, like:
  * single-board computer (SBC) [BCM2837B0](https://www.raspberrypi.com/documentation/computers/processors.html#bcm2837b0)
  * [schematic](RP-008339-DS-1-raspberry-pi-3-b-plus-reduced-schematics.pdf)
+ * [Results, Correlation, and Evaluation](./Documents/results_and_evaluation.md) - Contains the literature comparison (WCRL/WCET) and the empirical latency findings.
 
 For pinout mapping, use [pinout.xyz](https://pinout.xyz/)
 

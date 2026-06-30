@@ -16,25 +16,25 @@ sequenceDiagram
     %% Parallel execution phase
     par Remote Profiling & Load for all scenarios
         %% in case of iperf3 usage
-        Local->>Local: Start network server (if needed)
+        Note over Local: Start network server (if needed)
         %% Start the remote execution (Headless hand-off)
         Local->>SSHStart: SSH exec: test_start.sh [args]
-        SSHStart->>SSHStart: Write arguments to shared service-env-var file
+        Note over SSHStart: Write arguments to shared service-env-var file
         SSHStart->>SystemD: sudo systemctl start test-exec.service &
         SSHStart->>SystemD: sudo systemctl start led-toggle.service &
         SSHStart-->>Local: exit 0 (Returns immediately)
 
         SystemD->>+TestExec: ExecStart=test_exec.sh
-        Local->>+Local: Start Python Saleae Capture script
+        Note over Local: Start Python Saleae Capture script
         Note over TestExec: Register SYNC_WALL and SYNC_MONO start time
         SystemD->>+LedToggle: ExecStart=led-toggle
-        TestExec->>TestExec: Start profiling (cyclictest, mpstat, vmstat)<br/>Start load generators (fio, stress-ng, iperf3)
-        LedToggle->>LedToggle: GPIO Toggle Loop
-        TestExec->>TestExec: sleep(CAPTURE_DURATION)
-        LedToggle->>LedToggle: Write edge timestamp to csv file
+        Note over LedToggle: Toggle the pins
+        
+        Note over TestExec: Start profiling (cyclictest, mpstat, vmstat)<br/>Start load generators (fio, stress-ng, iperf3)
+        Note over LedToggle: Write edge timestamp to csv file
         LedToggle-->>-SystemD: exit 0
-        Local->>-Local: End Python Saleae Capture script
-        TestExec->>TestExec: Stop profiling & load Save remote logs
+        Note over Local: End Python Saleae Capture script
+        Note over TestExec: Stop profiling & load Save remote logs
         Note over TestExec: Register SYNC_WALL and SYNC_MONO end time
         TestExec-->>-SystemD: exit 0
         
@@ -45,11 +45,11 @@ sequenceDiagram
         end
 
         %% in case of iperf3 usage
-        Local->>Local: Stop network server (if it was started)
+        Note over Local: Stop network server (if it was started)
     end
     
     %% Data collection
-    Local->>Local: scp remote logs to Local Host
-    Local->>Local: Run Python Results Processing script
+    Note over Local: scp remote logs to Local Host
+    Note over Local: Run Python Results Processing script
 
     Local -->>- User: 
