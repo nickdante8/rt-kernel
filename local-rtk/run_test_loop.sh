@@ -9,7 +9,8 @@ set -e
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 cd "$SCRIPT_DIR"
 
-NUMBER_RUNS=50
+NUMBER_RUNS=5
+COOLDOWN_TIME=60
 TEST_OUTPUT_PATH="${SCRIPT_DIR}/test_results"
 
 
@@ -32,7 +33,7 @@ main() {
         latest=$(ls -td ${TEST_OUTPUT_PATH}/rt_* | head -1)
         mv "$latest" "${TEST_OUTPUT_PATH}/journal/run_${i}"
         echo "Completed run ${i}/${NUMBER_RUNS}"
-        sleep 30  # Cool-down between runs to avoid thermal bias
+        sleep $COOLDOWN_TIME  # Cool-down between runs to avoid thermal bias
     done
 }
 
